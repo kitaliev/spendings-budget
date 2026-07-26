@@ -5329,4 +5329,494 @@ git commit -m "feat: wire App shell — tabs, settings overlay, always-on-launch
 
 Both are small (one new component + a couple of store calls each, everything they depend on already exists and is tested) but they are real product decisions — where exactly the control lives, what the add-category form looks like — that weren't part of the approved spec or prototype. I did not invent answers and bolt them onto this plan; flagging them for you now rather than guessing.
 
+**Resolution:** both gaps are closed below, as Task 26 and Task 27.
+
+---
+
+## Task 26: Add-category form
+
+**Files:**
+- Modify: `src/components/settings/CategoryTree.vue`
+- Modify: `src/components/settings/CategoryTree.spec.js`
+
+A "+ Добавить категорию" toggle at the top of the tree reveals a form: emoji, name, and an optional parent picked from the same flattened list already rendered below it.
+
+- [ ] **Step 1: Add the failing tests to `src/components/settings/CategoryTree.spec.js`**
+
+Append these `describe` blocks to the existing file (keep everything already there):
+
+```js
+describe('CategoryTree — adding a category', () => {
+  it('reveals a form when the add toggle is tapped', async () => {
+    seed();
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    expect(wrapper.find('.category-tree__add-form').exists()).toBe(true);
+  });
+
+  it('creates a root category with the entered name and emoji, then closes the form', async () => {
+    seed();
+    categoriesDb.createCategory.mockResolvedValue({ id: 'new1', name: 'Здоровье', emoji: '💊', parentId: null, archived: false });
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-emoji').setValue('💊');
+    await wrapper.find('.category-tree__add-name').setValue('Здоровье');
+    await wrapper.find('.category-tree__add-form').trigger('submit');
+    expect(categoriesDb.createCategory).toHaveBeenCalledWith({ name: 'Здоровье', emoji: '💊', parentId: null });
+    expect(wrapper.find('.category-tree__add-form').exists()).toBe(false);
+  });
+
+  it('creates a subcategory when a parent is selected', async () => {
+    seed();
+    categoriesDb.createCategory.mockResolvedValue({ id: 'new2', name: 'Спортзал', emoji: '🏋️', parentId: 'food', archived: false });
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-name').setValue('Спортзал');
+    await wrapper.find('.category-tree__add-parent').setValue('food');
+    await wrapper.find('.category-tree__add-form').trigger('submit');
+    expect(categoriesDb.createCategory).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Спортзал', parentId: 'food' })
+    );
+  });
+
+  it('does not submit without a name', async () => {
+    seed();
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-form').trigger('submit');
+    expect(categoriesDb.createCategory).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `npm test -- src/components/settings/CategoryTree.spec.js`
+Expected: FAIL — `.category-tree__add-toggle` does not exist yet.
+
+- [ ] **Step 3: Update `src/components/settings/CategoryTree.vue`**
+
+Replace the `<template>` block with:
+
+```vue
+<template>
+  <div class="category-tree">
+    <button class="category-tree__add-toggle" @click="addingOpen = !addingOpen">
+      {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
+    </button>
+
+    <form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
+      <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="4" />
+      <input v-model="newName" class="category-tree__add-name" placeholder="Название" />
+      <select v-model="newParentId" class="category-tree__add-parent">
+        <option :value="null">Без родителя</option>
+        <option v-for="row in rows" :key="row.category.id" :value="row.category.id">
+          {{ '—'.repeat(row.depth) }} {{ row.category.name }}
+        </option>
+      </select>
+      <button type="submit" class="category-tree__add-submit">Создать</button>
+    </form>
+
+    <div
+      v-for="row in rows"
+      :key="row.category.id"
+      class="tree-row"
+      :class="{ 'tree-row--sub': row.depth > 0, 'tree-row--revealed': revealedId === row.category.id }"
+      :style="{ paddingLeft: 14 + row.depth * 24 + 'px' }"
+    >
+      <span class="tree-row__emoji">{{ row.category.emoji }}</span>
+      <span class="tree-row__name">{{ row.category.name }}</span>
+      <button class="tree-row__more" aria-label="Действия" @click="toggleRevealed(row.category.id)">⋯</button>
+      <div class="tree-row__actions">
+        <button class="tree-row__action tree-row__action--archive" @click="archive(row.category.id)">Архив</button>
+        <button class="tree-row__action tree-row__action--delete" @click="confirmDelete(row.category)">Удалить</button>
+      </div>
+    </div>
+  </div>
+</template>
+```
+
+Add to `data()` (merge with the existing returned object):
+
+```js
+data() {
+  return {
+    revealedId: null,
+    addingOpen: false,
+    newName: '',
+    newEmoji: '',
+    newParentId: null,
+  };
+},
+```
+
+Add to `methods` (merge with the existing methods):
+
+```js
+async submitAdd() {
+  if (!this.newName.trim()) return;
+  await this.categoriesStore.create({
+    name: this.newName.trim(),
+    emoji: this.newEmoji.trim() || '📁',
+    parentId: this.newParentId,
+  });
+  this.newName = '';
+  this.newEmoji = '';
+  this.newParentId = null;
+  this.addingOpen = false;
+},
+```
+
+Add to the `<style lang="scss">` block:
+
+```scss
+.category-tree {
+  &__add-toggle {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--accent-strong);
+  }
+
+  &__add-form {
+    display: flex;
+    gap: 6px;
+    padding: 0 14px 12px;
+    flex-wrap: wrap;
+  }
+
+  &__add-emoji {
+    width: 44px;
+    text-align: center;
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 6px;
+  }
+
+  &__add-name {
+    flex: 1;
+    min-width: 100px;
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+
+  &__add-parent {
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
+  &__add-submit {
+    color: var(--accent-strong);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 6px 8px;
+  }
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npm test -- src/components/settings/CategoryTree.spec.js`
+Expected: PASS (9 tests total — 5 from Task 23 plus 4 new).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/settings/CategoryTree.vue src/components/settings/CategoryTree.spec.js
+git commit -m "feat: add category creation form"
+```
+
+---
+
+## Task 27: Transaction list (edit entry point)
+
+**Files:**
+- Create: `src/components/budget/TransactionList.vue`
+- Test: `src/components/budget/TransactionList.spec.js`
+- Modify: `src/components/budget/BudgetDashboard.vue`
+- Modify: `src/components/budget/BudgetDashboard.spec.js`
+- Modify: `src/App.vue`
+- Modify: `src/App.spec.js`
+
+A scrollable list under the pie chart's legend, most recent first; tapping a row is the only way to reach `ExpenseModal`'s edit mode (built in Task 17, unreachable until now).
+
+- [ ] **Step 1: Write the failing test for the list itself**
+
+```js
+// src/components/budget/TransactionList.spec.js
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mount } from '@vue/test-utils';
+import { setActivePinia, createPinia } from 'pinia';
+import TransactionList from './TransactionList.vue';
+import { useCategoriesStore } from '../../stores/categories.js';
+import { useTransactionsStore } from '../../stores/transactions.js';
+
+beforeEach(() => {
+  setActivePinia(createPinia());
+  useCategoriesStore().items = [{ id: 'food', name: 'Еда', emoji: '🍔', parentId: null, archived: false }];
+  useTransactionsStore().items = [
+    { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' },
+    { id: 't2', date: '2026-07-20', amount: 1200, categoryId: 'food' },
+    { id: 't3', date: '2026-06-01', amount: 999, categoryId: 'food' },
+  ];
+});
+
+describe('TransactionList', () => {
+  it('lists only transactions within the given month, most recent first', () => {
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    const rows = wrapper.findAll('.transaction-list__row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].find('.transaction-list__amount').text()).toBe('1 200 ₽');
+  });
+
+  it('shows the category emoji and name', () => {
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    expect(wrapper.findAll('.transaction-list__row')[0].text()).toContain('🍔');
+    expect(wrapper.findAll('.transaction-list__row')[0].text()).toContain('Еда');
+  });
+
+  it('shows an empty state when there are no transactions that month', () => {
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-01' } });
+    expect(wrapper.find('.transaction-list__empty').exists()).toBe(true);
+  });
+
+  it('emits edit with the transaction when a row is tapped', async () => {
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    await wrapper.findAll('.transaction-list__row')[0].trigger('click');
+    expect(wrapper.emitted('edit')[0][0]).toMatchObject({ id: 't2' });
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- src/components/budget/TransactionList.spec.js`
+Expected: FAIL — module `./TransactionList.vue` does not exist.
+
+- [ ] **Step 3: Implement `src/components/budget/TransactionList.vue`**
+
+```vue
+<template>
+  <div class="transaction-list">
+    <p class="section-title">Транзакции за месяц</p>
+    <p v-if="rows.length === 0" class="transaction-list__empty">Пока нет расходов в этом месяце</p>
+    <button
+      v-for="row in rows"
+      :key="row.transaction.id"
+      class="transaction-list__row"
+      @click="$emit('edit', row.transaction)"
+    >
+      <span class="transaction-list__date">{{ row.transaction.date.slice(8, 10) }}</span>
+      <span class="transaction-list__emoji">{{ row.category ? row.category.emoji : '❓' }}</span>
+      <span class="transaction-list__name">{{ row.category ? row.category.name : 'Без категории' }}</span>
+      <span class="transaction-list__amount">{{ formatMoney(row.transaction.amount) }}</span>
+    </button>
+  </div>
+</template>
+
+<script>
+import { useCategoriesStore } from '../../stores/categories.js';
+import { useTransactionsStore } from '../../stores/transactions.js';
+import { formatMoney } from '../../utils/currency.js';
+
+export default {
+  name: 'TransactionList',
+  props: {
+    monthKey: {
+      type: String,
+      required: true,
+    },
+  },
+  emits: ['edit'],
+  computed: {
+    categoriesStore() {
+      return useCategoriesStore();
+    },
+    rows() {
+      const transactionsStore = useTransactionsStore();
+      return transactionsStore.items
+        .filter((t) => t.date.startsWith(this.monthKey))
+        .slice()
+        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        .map((transaction) => ({
+          transaction,
+          category: this.categoriesStore.byId(transaction.categoryId),
+        }));
+    },
+  },
+  methods: {
+    formatMoney,
+  },
+};
+</script>
+
+<style lang="scss">
+.transaction-list {
+  padding-bottom: 12px;
+
+  &__empty {
+    font-size: 13px;
+    color: var(--ink-muted);
+    padding: 8px 4px;
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 4px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  &__date {
+    font-family: $font-money;
+    font-size: 12px;
+    color: var(--ink-muted);
+    width: 20px;
+  }
+
+  &__emoji {
+    font-size: 15px;
+  }
+
+  &__name {
+    flex: 1 1 auto;
+    font-size: 14px;
+  }
+
+  &__amount {
+    font-family: $font-money;
+    font-size: 13px;
+    color: var(--ink-secondary);
+  }
+}
+</style>
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test -- src/components/budget/TransactionList.spec.js`
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Add the failing test for Dashboard wiring to `src/components/budget/BudgetDashboard.spec.js`**
+
+Append this `describe` block to the existing file:
+
+```js
+describe('BudgetDashboard — transaction list', () => {
+  it('forwards TransactionList\'s edit event as edit-transaction', async () => {
+    const wrapper = mount(BudgetDashboard);
+    const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
+    await wrapper.findComponent({ name: 'TransactionList' }).vm.$emit('edit', transaction);
+    expect(wrapper.emitted('edit-transaction')[0]).toEqual([transaction]);
+  });
+});
+```
+
+- [ ] **Step 6: Run test to verify it fails**
+
+Run: `npm test -- src/components/budget/BudgetDashboard.spec.js`
+Expected: FAIL — `TransactionList` is not rendered by `BudgetDashboard` yet, and `edit-transaction` is not declared.
+
+- [ ] **Step 7: Update `src/components/budget/BudgetDashboard.vue`**
+
+Add the import:
+
+```js
+import TransactionList from './TransactionList.vue';
+```
+
+Add `TransactionList` to the `components` object (alongside `TopBar, MonthNav, MonthChart, CategoryPie`) and add `'edit-transaction'` to the `emits` array (alongside `'open-settings'`).
+
+Add to the end of the `<template>`, right after `<CategoryPie :month-key="currentMonthKey" />`:
+
+```vue
+<TransactionList :month-key="currentMonthKey" @edit="$emit('edit-transaction', $event)" />
+```
+
+- [ ] **Step 8: Run test to verify it passes**
+
+Run: `npm test -- src/components/budget/BudgetDashboard.spec.js`
+Expected: PASS (9 tests total — 8 from Task 20 plus 1 new).
+
+- [ ] **Step 9: Add the failing test for App-level wiring to `src/App.spec.js`**
+
+Append this `describe` block to the existing file:
+
+```js
+describe('App — editing a transaction from the dashboard list', () => {
+  it('opens the expense modal in edit mode with the selected transaction', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
+    await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('edit-transaction', transaction);
+    await wrapper.vm.$nextTick();
+    const modal = wrapper.findComponent({ name: 'ExpenseModal' });
+    expect(modal.props('visible')).toBe(true);
+    expect(modal.props('editingTransaction')).toEqual(transaction);
+  });
+
+  it('clears editingTransaction after the modal closes, so the next FAB tap starts a fresh entry', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
+    await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('edit-transaction', transaction);
+    await wrapper.findComponent({ name: 'ExpenseModal' }).vm.$emit('close');
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('editingTransaction')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 10: Run test to verify it fails**
+
+Run: `npm test -- src/App.spec.js`
+Expected: FAIL — `BudgetDashboard` does not emit `edit-transaction` to anything yet in `App.vue`.
+
+- [ ] **Step 11: Update `src/App.vue`**
+
+Change the `BudgetDashboard` tag in the template to:
+
+```vue
+<BudgetDashboard
+  v-if="activeTab === 'budget'"
+  @open-settings="showSettings = true"
+  @edit-transaction="openEditModal"
+/>
+```
+
+Add this method alongside `openAddModal` and `closeExpenseModal`:
+
+```js
+openEditModal(transaction) {
+  this.editingTransaction = transaction;
+  this.showExpenseModal = true;
+},
+```
+
+- [ ] **Step 12: Run test to verify it passes**
+
+Run: `npm test -- src/App.spec.js`
+Expected: PASS (8 tests total — 6 from Task 25 plus 2 new).
+
+- [ ] **Step 13: Run the full test suite one more time**
+
+Run: `npm test`
+Expected: every spec file passes.
+
+- [ ] **Step 14: Commit**
+
+```bash
+git add src/components/budget/TransactionList.vue src/components/budget/TransactionList.spec.js src/components/budget/BudgetDashboard.vue src/components/budget/BudgetDashboard.spec.js src/App.vue src/App.spec.js
+git commit -m "feat: add transaction list as the edit entry point"
+```
+
 ---

@@ -9,6 +9,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon-192.png', 'icon-512.png'],
       manifest: {
+        lang: 'ru',
         name: 'Бюджет на день',
         short_name: 'Бюджет',
         description: 'Дневной бюджет и учёт долгов',

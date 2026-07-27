@@ -3103,6 +3103,17 @@ describe('ExpenseModal — adding a new expense', () => {
     expect(transactionsDb.createTransaction).not.toHaveBeenCalled();
   });
 
+  it('rejects an amount that evaluates to zero or negative, without touching the store', async () => {
+    // "5−10" is ordinary keypad input (not a leading/consecutive operator) that
+    // evaluates to a negative number — must be rejected before it ever reaches
+    // transactionsStore.create.
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    for (const key of ['5', '−', '1', '0']) await findKey(wrapper, key).trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click');
+    expect(transactionsDb.createTransaction).not.toHaveBeenCalled();
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5−10'); // left as typed, not silently cleared
+  });
+
   it('resets the amount after a successful commit and stays open', async () => {
     transactionsDb.createTransaction.mockResolvedValue({ id: 't1', amount: 500, date: '2026-07-27', categoryId: 'fun' });
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
@@ -3241,8 +3252,18 @@ export default {
     async commit(category) {
       if (!this.raw) return;
       const amount = evaluateExpression(this.raw);
-      const transactionsStore = useTransactionsStore();
       const toast = useToastStore();
+      if (amount <= 0) {
+        // Reachable through completely ordinary keypad input, not just a
+        // leading operator — e.g. "5−10" is a ordinarily-typed subtraction
+        // that evaluates to a negative result. An expense's amount must be
+        // positive; reject before it ever reaches the store, rather than
+        // storing a negative transaction that later formatting (amount ->
+        // string -> re-parsed on edit) can't safely round-trip.
+        toast.show('Сумма должна быть больше нуля');
+        return;
+      }
+      const transactionsStore = useTransactionsStore();
 
       if (this.editingTransaction) {
         await transactionsStore.update(this.editingTransaction.id, {
@@ -3367,7 +3388,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/ExpenseModal.spec.js`
-Expected: PASS (8 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 5: Commit**
 

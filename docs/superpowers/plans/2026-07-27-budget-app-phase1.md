@@ -3125,7 +3125,7 @@ Composes Keypad + DatePicker + CategoryPicker. Per spec §8: closing without inp
 ```js
 // src/components/expense/ExpenseModal.spec.js
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import ExpenseModal from './ExpenseModal.vue';
 import { useCategoriesStore } from '../../stores/categories.js';
@@ -3189,6 +3189,23 @@ describe('ExpenseModal — adding a new expense', () => {
     expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0');
     expect(wrapper.emitted('close')).toBeUndefined();
   });
+
+  it('ignores a second tap on the same category while the first commit is still in flight', async () => {
+    // The picker only resets after the store write resolves, so the exact
+    // same leaf row is still on screen — and still tappable — for the
+    // entire await gap. A fast double-tap there must not create the
+    // transaction twice.
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    const row = wrapper.find('.category-picker__row');
+    await row.trigger('click');
+    await row.trigger('click');
+    resolveCreate({ id: 't1', amount: 500, date: '2026-07-27', categoryId: 'fun' });
+    await flushPromises();
+    expect(transactionsDb.createTransaction).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ExpenseModal — editing an existing expense', () => {
@@ -3239,7 +3256,7 @@ Expected: FAIL — module `./ExpenseModal.vue` does not exist.
     <div class="expense-modal__sheet">
       <div class="expense-modal__handle-row">
         <div class="expense-modal__handle"></div>
-        <button class="expense-modal__close" aria-label="Закрыть" @click="close">✕</button>
+        <button type="button" class="expense-modal__close" aria-label="Закрыть" @click="close">✕</button>
       </div>
 
       <div class="expense-modal__entry">
@@ -3253,7 +3270,7 @@ Expected: FAIL — module `./ExpenseModal.vue` does not exist.
 
       <Keypad @key="onKey" />
 
-      <button v-if="editingTransaction" class="expense-modal__delete" @click="onDelete">Удалить</button>
+      <button v-if="editingTransaction" type="button" class="expense-modal__delete" @click="onDelete">Удалить</button>
     </div>
   </div>
 </template>
@@ -3286,6 +3303,12 @@ export default {
     return {
       raw: '',
       date: todayKey(),
+      // The category picker only resets/re-renders after the store write
+      // below resolves, so the exact same leaf row a user just tapped is
+      // still on screen — and still tappable — for the whole await gap.
+      // This guards commit()/onDelete() against a fast double-tap creating
+      // (or deleting) the same transaction twice.
+      submitting: false,
     };
   },
   watch: {
@@ -3316,7 +3339,7 @@ export default {
       }
     },
     async commit(category) {
-      if (!this.raw) return;
+      if (!this.raw || this.submitting) return;
       const amount = evaluateExpression(this.raw);
       const toast = useToastStore();
       if (amount <= 0) {
@@ -3329,28 +3352,39 @@ export default {
         toast.show('Сумма должна быть больше нуля');
         return;
       }
-      const transactionsStore = useTransactionsStore();
+      this.submitting = true;
+      try {
+        const transactionsStore = useTransactionsStore();
 
-      if (this.editingTransaction) {
-        await transactionsStore.update(this.editingTransaction.id, {
-          amount,
-          date: this.date,
-          categoryId: category.id,
-        });
-        toast.show(`Изменено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-        this.close();
-      } else {
-        await transactionsStore.create({ amount, date: this.date, categoryId: category.id });
-        toast.show(`Добавлено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-        this.raw = '';
-        this.date = todayKey();
-        this.$refs.picker.reset();
+        if (this.editingTransaction) {
+          await transactionsStore.update(this.editingTransaction.id, {
+            amount,
+            date: this.date,
+            categoryId: category.id,
+          });
+          toast.show(`Изменено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
+          this.close();
+        } else {
+          await transactionsStore.create({ amount, date: this.date, categoryId: category.id });
+          toast.show(`Добавлено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
+          this.raw = '';
+          this.date = todayKey();
+          this.$refs.picker.reset();
+        }
+      } finally {
+        this.submitting = false;
       }
     },
     async onDelete() {
-      const transactionsStore = useTransactionsStore();
-      await transactionsStore.remove(this.editingTransaction.id);
-      this.close();
+      if (this.submitting) return;
+      this.submitting = true;
+      try {
+        const transactionsStore = useTransactionsStore();
+        await transactionsStore.remove(this.editingTransaction.id);
+        this.close();
+      } finally {
+        this.submitting = false;
+      }
     },
     close() {
       this.$emit('close');
@@ -3454,7 +3488,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/ExpenseModal.spec.js`
-Expected: PASS (9 tests).
+Expected: PASS (10 tests).
 
 - [ ] **Step 5: Commit**
 

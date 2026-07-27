@@ -4074,14 +4074,21 @@ Expected: FAIL — module `./CategoryPie.vue` does not exist.
 <template>
   <div class="category-pie">
     <p class="category-pie__title">{{ stack.length ? 'Подкатегории' : 'Расход по категориям' }}</p>
-    <button v-if="stack.length" class="category-pie__back" @click="back">‹ Назад ко всем категориям</button>
+    <button v-if="stack.length" type="button" class="category-pie__back" @click="back">
+      <span aria-hidden="true">‹</span> Назад ко всем категориям
+    </button>
 
-    <div class="category-pie__chart" :style="{ background: gradient }"></div>
+    <!-- Every amount/percentage on this chart is already in the legend below
+         as text — this circle is redundant visual reinforcement, same as
+         MonthChart's bare letter or TabBar's icon, so it's hidden from
+         assistive tech rather than left as an unlabeled, contentless stop. -->
+    <div class="category-pie__chart" :style="{ background: gradient }" aria-hidden="true"></div>
 
     <div class="category-pie__legend">
       <button
         v-for="row in rows"
         :key="row.category.id"
+        type="button"
         class="category-pie__legend-item"
         :disabled="!row.hasChildren"
         @click="drillInto(row.category)"

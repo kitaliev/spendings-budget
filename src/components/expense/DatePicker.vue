@@ -1,0 +1,103 @@
+<template>
+  <div class="date-row">
+    <button
+      type="button"
+      class="date-row__btn"
+      :class="{ 'date-row__btn--active': mode === 'today' }"
+      @click="$emit('update:modelValue', todayKeyValue())"
+    >Сегодня</button>
+    <button
+      type="button"
+      class="date-row__btn"
+      :class="{ 'date-row__btn--active': mode === 'yesterday' }"
+      @click="$emit('update:modelValue', yesterdayKeyValue())"
+    >Вчера</button>
+    <!-- Not a <button>: the real control here is the native <input type="date">
+         below. The <label> wraps it purely to extend the tap target to the
+         whole pill (matching the other two buttons) and to widen the accname
+         via standard label-wrapping-input semantics — no aria-label needed,
+         the sibling <span>'s text already becomes the input's accessible
+         name, and opacity:0 doesn't remove it from the a11y tree. -->
+    <label class="date-row__btn" :class="{ 'date-row__btn--active': mode === 'other' }">
+      <input type="date" class="date-row__native" :value="modelValue" @change="onNativeChange" />
+      <span>{{ otherLabel }}</span>
+    </label>
+  </div>
+</template>
+
+<script>
+import { todayKey, yesterdayKey } from '../../utils/date.js';
+
+export default {
+  name: 'DatePicker',
+  props: {
+    modelValue: {
+      type: String,
+      required: true,
+    },
+  },
+  emits: ['update:modelValue'],
+  data() {
+    return {
+      otherLabel: 'Другая дата',
+    };
+  },
+  computed: {
+    mode() {
+      if (this.modelValue === todayKey()) return 'today';
+      if (this.modelValue === yesterdayKey()) return 'yesterday';
+      return 'other';
+    },
+  },
+  methods: {
+    todayKeyValue: todayKey,
+    yesterdayKeyValue: yesterdayKey,
+    onNativeChange(event) {
+      const value = event.target.value;
+      if (!value) return;
+      // Build the label from local-time parts, not `new Date(value)` — a bare
+      // YYYY-MM-DD string parses as UTC midnight and can render one day off
+      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
+      const [y, m, d] = value.split('-').map(Number);
+      this.otherLabel = new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      this.$emit('update:modelValue', value);
+    },
+  },
+};
+</script>
+
+<style lang="scss">
+.date-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+
+  &__btn {
+    position: relative;
+    flex: 1;
+    text-align: center;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 9px 4px;
+    border-radius: 11px;
+    background: var(--surface-sunken);
+    color: var(--ink-secondary);
+    border: 1px solid transparent;
+    overflow: hidden;
+
+    &--active {
+      background: var(--accent-wash);
+      color: var(--accent-strong);
+      border-color: var(--accent);
+    }
+  }
+
+  &__native {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    width: 100%;
+    cursor: pointer;
+  }
+}
+</style>

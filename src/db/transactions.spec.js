@@ -26,6 +26,16 @@ describe('updateTransaction', () => {
   it('throws for an unknown id', async () => {
     await expect(updateTransaction('missing', { amount: 1 })).rejects.toThrow();
   });
+
+  it('does not lose one of two concurrent partial updates to the same row', async () => {
+    const created = await createTransaction({ amount: 500, date: '2026-07-20', categoryId: 'cat-1' });
+    await Promise.all([
+      updateTransaction(created.id, { amount: 750 }),
+      updateTransaction(created.id, { date: '2026-07-21' }),
+    ]);
+    const [stored] = await listTransactions();
+    expect(stored).toMatchObject({ amount: 750, date: '2026-07-21' });
+  });
 });
 
 describe('deleteTransaction', () => {

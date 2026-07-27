@@ -19,6 +19,17 @@ describe('useTransactionsStore.create', () => {
   });
 });
 
+describe('useTransactionsStore.update', () => {
+  it('replaces the matching item in place with the db layer\'s returned row', async () => {
+    transactionsDb.createTransaction.mockResolvedValue({ id: '1', amount: 500, date: '2026-07-20', categoryId: 'c1' });
+    transactionsDb.updateTransaction.mockResolvedValue({ id: '1', amount: 750, date: '2026-07-20', categoryId: 'c1' });
+    const store = useTransactionsStore();
+    await store.create({ amount: 500, date: '2026-07-20', categoryId: 'c1' });
+    await store.update('1', { amount: 750 });
+    expect(store.items[0].amount).toBe(750);
+  });
+});
+
 describe('useTransactionsStore.remove', () => {
   it('removes the transaction from items', async () => {
     transactionsDb.createTransaction.mockResolvedValue({ id: '1', amount: 500, date: '2026-07-20', categoryId: 'c1' });

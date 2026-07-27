@@ -14,10 +14,17 @@ export async function listTransactions() {
 
 export async function updateTransaction(id, changes) {
   const db = await getDb();
-  const existing = await db.get('transactions', id);
+  // Read and write share one transaction (same pattern as budgetRates.js's
+  // addRate) rather than being two separate implicit transactions with an
+  // await gap between them: two concurrent partial updates to the same row
+  // would otherwise both read the same pre-write snapshot and each overwrite
+  // the other's field when they land.
+  const tx = db.transaction('transactions', 'readwrite');
+  const existing = await tx.store.get(id);
   if (!existing) throw new Error(`Transaction ${id} not found`);
   const updated = { ...existing, ...changes };
-  await db.put('transactions', updated);
+  await tx.store.put(updated);
+  await tx.done;
   return updated;
 }
 

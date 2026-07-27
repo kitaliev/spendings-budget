@@ -697,7 +697,7 @@ export function daysElapsedInMonth(monthKey, todayDateKey = todayKey()) {
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/utils/date.spec.js`
-Expected: PASS (9 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 9: Commit**
 
@@ -1258,7 +1258,7 @@ export function calculateAvailable({ monthKey, daysElapsed, rateSegments, transa
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/utils/budgetMath.spec.js`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Write the failing test for the rate-history DB layer**
 
@@ -1833,7 +1833,7 @@ export async function listAllPayments() {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/db/debts.spec.js`
-Expected: PASS (5 tests).
+Expected: PASS (4 tests).
 
 - [ ] **Step 5: Write the failing test for the debts store**
 
@@ -1952,7 +1952,7 @@ export const useDebtsStore = defineStore('debts', {
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/stores/debts.spec.js`
-Expected: PASS (4 tests).
+Expected: PASS (3 tests).
 
 - [ ] **Step 9: Commit**
 
@@ -3363,7 +3363,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/ExpenseModal.spec.js`
-Expected: PASS (9 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -4136,7 +4136,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/budget/BudgetDashboard.spec.js`
-Expected: PASS (8 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -5754,7 +5754,7 @@ Add to the end of the `<template>`, right after `<CategoryPie :month-key="curren
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/components/budget/BudgetDashboard.spec.js`
-Expected: PASS (9 tests total — 8 from Task 20 plus 1 new).
+Expected: PASS (8 tests total — 7 from Task 20 plus 1 new).
 
 - [ ] **Step 9: Add the failing test for App-level wiring to `src/App.spec.js`**
 

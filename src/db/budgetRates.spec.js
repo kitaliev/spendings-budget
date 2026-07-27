@@ -30,4 +30,12 @@ describe('addRate', () => {
     const rates = await listRates();
     expect(rates.map((r) => r.amount).sort()).toEqual([2500, 3500]);
   });
+
+  it('updates the existing segment in place when effectiveFrom repeats, instead of creating a competing row', async () => {
+    await addRate({ amount: 2500, effectiveFrom: '2026-07-01' });
+    await addRate({ amount: 3000, effectiveFrom: '2026-07-01' }); // changed mind, same day
+    const rates = await listRates();
+    expect(rates).toHaveLength(1);
+    expect(rates[0].amount).toBe(3000);
+  });
 });

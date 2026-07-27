@@ -20,6 +20,14 @@ describe('calculateAccrual', () => {
   it('returns 0 when no rate has ever been set', () => {
     expect(calculateAccrual('2026-07', 10, [])).toBe(0);
   });
+
+  it('does not credit days before the earliest known rate (e.g. app installed mid-month)', () => {
+    // A first-time user who starts on day 15 has no rate at all for days 1-14
+    // — those must accrue 0, not the day-15 rate applied retroactively.
+    const segments = [{ amount: 2500, effectiveFrom: '2026-07-15' }];
+    expect(calculateAccrual('2026-07', 15, segments)).toBe(2500); // only day 15 counts
+    expect(calculateAccrual('2026-07', 5, segments)).toBe(0); // entirely before the rate existed
+  });
 });
 
 describe('calculateSpend', () => {

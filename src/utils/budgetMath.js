@@ -3,12 +3,16 @@ function dateKeyForDay(monthKey, day) {
 }
 
 function rateActiveOn(dateKey, sortedSegments) {
-  let active = sortedSegments[0] ?? { amount: 0 };
+  // No fallback to the earliest segment: a date before every known
+  // effectiveFrom genuinely had no rate yet (e.g. the day the app was
+  // first installed mid-month) and must accrue 0, not the first rate
+  // applied retroactively.
+  let active = null;
   for (const segment of sortedSegments) {
     if (segment.effectiveFrom <= dateKey) active = segment;
     else break;
   }
-  return active.amount;
+  return active ? active.amount : 0;
 }
 
 export function calculateAccrual(monthKey, daysElapsed, rateSegments) {

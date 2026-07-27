@@ -92,6 +92,17 @@ export default {
       color: var(--accent-strong);
       border-color: var(--accent);
     }
+
+    // The third pill is a <label>, not a <button> — the global
+    // button:focus-visible rule (_reset.scss) never matches it. Its real
+    // control is the input below, whose own focus outline is invisible
+    // (opacity: 0 suppresses it along with everything else), so without
+    // this, Tab-cycling to the native date input shows no focus indicator
+    // at all.
+    &:focus-within {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
   }
 
   &__native {
@@ -99,6 +110,7 @@ export default {
     inset: 0;
     opacity: 0;
     width: 100%;
+    height: 100%;
     cursor: pointer;
   }
 }

@@ -3741,6 +3741,7 @@ Expected: FAIL — module `./MonthChart.vue` does not exist.
       <button
         v-for="month in scaledMonths"
         :key="month.key"
+        type="button"
         class="month-chart__col"
         :class="{
           'month-chart__col--active': month.active,

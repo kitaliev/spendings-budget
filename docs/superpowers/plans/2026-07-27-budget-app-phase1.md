@@ -608,7 +608,7 @@ Expected: PASS (4 tests).
 ```js
 // src/utils/date.spec.js
 import { describe, it, expect } from 'vitest';
-import { toDateKey, toMonthKey, daysInMonth, daysElapsedInMonth } from './date.js';
+import { toDateKey, toMonthKey, daysInMonth, daysElapsedInMonth, monthNameWithYear } from './date.js';
 
 describe('toDateKey', () => {
   it('formats a Date as YYYY-MM-DD', () => {
@@ -649,7 +649,21 @@ describe('daysElapsedInMonth', () => {
     expect(daysElapsedInMonth('2026-12', '2026-07-26')).toBe(0);
   });
 });
+
+describe('monthNameWithYear', () => {
+  it('capitalizes the Russian month name and appends the year', () => {
+    expect(monthNameWithYear('2026-01')).toBe('Январь 2026');
+  });
+
+  it('works for every month, not just ones without special-casing', () => {
+    expect(monthNameWithYear('2026-03')).toBe('Март 2026');
+    expect(monthNameWithYear('2026-08')).toBe('Август 2026');
+    expect(monthNameWithYear('2026-12')).toBe('Декабрь 2026');
+  });
+});
 ```
+
+**Note added during Task 18's review:** `monthNameWithYear` didn't exist when this task was first written — it was extracted here later, once Task 18 (`MonthChart`) and Task 20 (`BudgetDashboard`) turned out to need the exact same "Месяц ГГГГ" string independently. Add the import (`monthNameWithYear` alongside the others below) and the function itself (in Step 7) even though it wasn't part of this task's original scope.
 
 - [ ] **Step 6: Run test to verify it fails**
 
@@ -692,12 +706,23 @@ export function daysElapsedInMonth(monthKey, todayDateKey = todayKey()) {
   if (monthKey < today) return daysInMonth(monthKey);
   return Number(todayDateKey.slice(8, 10));
 }
+
+// "Январь 2026" — the one Russian month-name format needed in more than one
+// place (MonthChart's aria-labels, BudgetDashboard's month heading). Built
+// via a local-time Date + toLocaleDateString rather than a hardcoded name
+// array, so there's a single source of truth instead of two independently
+// maintained lists that could quietly drift apart.
+export function monthNameWithYear(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  const name = new Date(year, month - 1, 1).toLocaleDateString('ru-RU', { month: 'long' });
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${year}`;
+}
 ```
 
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/utils/date.spec.js`
-Expected: PASS (8 tests).
+Expected: PASS (11 tests).
 
 - [ ] **Step 9: Commit**
 
@@ -3690,12 +3715,16 @@ const months = [
   { key: '2026-03', short: 'М', total: 80100, empty: false, active: false, negative: true },
   { key: '2026-07', short: 'И', total: 48200, empty: false, active: true, negative: false },
   { key: '2026-08', short: 'А', total: 0, empty: true, active: false, negative: false },
+  // Tracked and genuinely spent nothing — distinct from Август above, which
+  // hasn't happened yet. Appended (not inserted in calendar order) so the
+  // existing index-based assertions on the first four months stay stable.
+  { key: '2026-02', short: 'Ф', total: 0, empty: false, active: false, negative: false },
 ];
 
 describe('MonthChart', () => {
   it('renders one column per month', () => {
     const wrapper = mount(MonthChart, { props: { months } });
-    expect(wrapper.findAll('.month-chart__col')).toHaveLength(4);
+    expect(wrapper.findAll('.month-chart__col')).toHaveLength(5);
   });
 
   it('marks the active month', () => {
@@ -3724,6 +3753,46 @@ describe('MonthChart', () => {
     const bars = wrapper.findAll('.month-chart__bar');
     expect(bars[1].attributes('style')).toContain('--h: 100'); // Март is the max (80100)
   });
+
+  it('gives a tracked, genuinely zero-spend month the same floor as a populated one, not the shorter empty-month floor', () => {
+    const wrapper = mount(MonthChart, { props: { months } });
+    const bars = wrapper.findAll('.month-chart__bar');
+    expect(bars[4].attributes('style')).toContain('--h: 6'); // Февраль: total 0, but not empty
+    expect(bars[3].attributes('style')).toContain('--h: 4'); // Август: empty, shorter floor
+  });
+});
+
+describe('MonthChart — accessible labels', () => {
+  // The visible label is a single, deliberately ambiguous Cyrillic letter (see
+  // component comment) — a screen-reader user swiping through 12 buttons that
+  // each announce just one letter (often repeated, e.g. "И" for both Июнь and
+  // Июль) gets no usable information. aria-label reconstructs a real name
+  // from data this component already receives (month.key, month.total), so
+  // the fix stays local instead of waiting on a future props-shape change.
+  it('announces the month name and total for a populated month', () => {
+    const wrapper = mount(MonthChart, { props: { months } });
+    expect(wrapper.findAll('.month-chart__col')[0].attributes('aria-label')).toBe('Январь 2026, 61 200 ₽');
+  });
+
+  it('announces overspend for a negative month', () => {
+    const wrapper = mount(MonthChart, { props: { months } });
+    expect(wrapper.findAll('.month-chart__col')[1].attributes('aria-label')).toBe('Март 2026, перерасход, 80 100 ₽');
+  });
+
+  it('announces a future month as not yet reached, rather than as a 0 ₽ total', () => {
+    const wrapper = mount(MonthChart, { props: { months } });
+    expect(wrapper.findAll('.month-chart__col')[3].attributes('aria-label')).toBe('Август 2026, ещё не наступил');
+  });
+
+  it('announces a tracked, genuinely zero-spend month as a real 0 ₽ total, not as not-yet-reached', () => {
+    const wrapper = mount(MonthChart, { props: { months } });
+    expect(wrapper.findAll('.month-chart__col')[4].attributes('aria-label')).toBe('Февраль 2026, 0 ₽');
+  });
+
+  it('hides the bare-letter label from assistive tech so it does not compete with aria-label', () => {
+    const wrapper = mount(MonthChart, { props: { months } });
+    expect(wrapper.findAll('.month-chart__label')[0].attributes('aria-hidden')).toBe('true');
+  });
 });
 ```
 
@@ -3749,18 +3818,25 @@ Expected: FAIL — module `./MonthChart.vue` does not exist.
           'month-chart__col--empty': month.empty,
         }"
         :disabled="month.empty"
+        :aria-label="month.label"
         @click="$emit('select', month.key)"
       >
         <span class="month-chart__bar-wrap">
           <span class="month-chart__bar" :style="{ '--h': month.heightPct }"></span>
         </span>
-        <span class="month-chart__label">{{ month.short }}</span>
+        <!-- The visible glyph is a single, deliberately ambiguous letter (see
+             monthLabel below) — aria-hidden so assistive tech reads only the
+             richer aria-label above, not this letter as well. -->
+        <span class="month-chart__label" aria-hidden="true">{{ month.short }}</span>
       </button>
     </div>
   </div>
 </template>
 
 <script>
+import { formatMoney } from '../../utils/currency.js';
+import { monthNameWithYear } from '../../utils/date.js';
+
 export default {
   name: 'MonthChart',
   props: {
@@ -3775,8 +3851,31 @@ export default {
       const max = Math.max(1, ...this.months.map((m) => m.total));
       return this.months.map((m) => ({
         ...m,
+        // A real past month can genuinely have total: 0 (tracked and spent
+        // nothing) and still gets this 6% floor — same as it would for a
+        // tiny nonzero spend that rounds down close to it. That's accepted
+        // here, not a bug: per spec this chart is a coarse, unlabeled
+        // height-only comparison (no value labels anywhere on it), so a bar
+        // that reads as "short" rather than "gone" is the right precision
+        // for "little to nothing was spent." Empty (future) months use a
+        // shorter, dimmed floor instead (below), which is the distinction
+        // that actually matters — "hasn't happened yet" staying visually
+        // distinct from "happened, near-zero."
         heightPct: m.empty ? 4 : Math.max(6, Math.round((m.total / max) * 100)),
+        label: this.monthLabel(m),
       }));
+    },
+  },
+  methods: {
+    // Builds a real accessible name from data already on the month (key,
+    // total) instead of leaving the button's name as the bare visible letter
+    // — see the aria-hidden note on the template's label span for why that
+    // letter alone isn't enough for a screen-reader user.
+    monthLabel(month) {
+      const heading = monthNameWithYear(month.key);
+      if (month.empty) return `${heading}, ещё не наступил`;
+      const amount = formatMoney(month.total);
+      return month.negative ? `${heading}, перерасход, ${amount}` : `${heading}, ${amount}`;
     },
   },
 };
@@ -3796,6 +3895,13 @@ export default {
   }
 
   &__col {
+    // The shared button reset (_reset.scss) doesn't zero out padding, and
+    // Blink's UA default (padding: 1px 6px) halves this button's own content
+    // box at realistic column widths — which .month-chart__bar-wrap and
+    // .month-chart__bar (60% width, max-width: 14px) both size themselves
+    // relative to. Verified in a real browser: without this, the bar never
+    // gets wide enough to hit its own max-width cap.
+    padding: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -3849,7 +3955,9 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/budget/MonthChart.spec.js`
-Expected: PASS (6 tests).
+Expected: PASS (12 tests).
+
+**Verified in this diligence pass:** a code-quality review found the bar never actually reaches its own `max-width: 14px` cap in a real browser (Blink's default button padding halves the content box `.month-chart__bar-wrap`/`.month-chart__bar` size themselves against) — confirmed with real `getBoundingClientRect()` measurements before/after adding `padding: 0`. The reference code above already has that fix, plus the `aria-label`/`monthNameWithYear` additions and the zero-spend-month test — don't drop any of them. `monthNameWithYear` (in `utils/date.js`) exists specifically so this component and Task 20's `BudgetDashboard.monthLabel` share one "Месяц ГГГГ" formatter instead of each maintaining an independent one.
 
 - [ ] **Step 5: Commit**
 
@@ -4292,9 +4400,12 @@ import MonthChart from './MonthChart.vue';
 import CategoryPie from './CategoryPie.vue';
 import { useBudgetStore } from '../../stores/budget.js';
 import { formatMoney } from '../../utils/currency.js';
-import { todayKey, toMonthKey } from '../../utils/date.js';
+import { todayKey, toMonthKey, monthNameWithYear } from '../../utils/date.js';
 
-const MONTH_NAMES = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+// MONTH_NAMES doesn't exist here on purpose — monthLabel below reuses
+// monthNameWithYear() (utils/date.js), the same "Месяц ГГГГ" formatter
+// MonthChart's aria-labels already use, instead of a second, independently
+// maintained name array producing the same string a different way.
 const MONTH_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const MONTH_INITIALS = ['Я', 'Ф', 'М', 'А', 'М', 'И', 'И', 'А', 'С', 'О', 'Н', 'Д'];
 
@@ -4324,9 +4435,7 @@ export default {
       return !this.isCurrentMonth;
     },
     monthLabel() {
-      const [y, m] = this.currentMonthKey.split('-').map(Number);
-      const name = MONTH_NAMES[m - 1];
-      return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${y}`;
+      return monthNameWithYear(this.currentMonthKey);
     },
     monthGenitive() {
       const m = Number(this.currentMonthKey.slice(5, 7));

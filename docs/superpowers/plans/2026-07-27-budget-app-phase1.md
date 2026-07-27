@@ -1792,10 +1792,18 @@ export async function listDebts() {
 
 export async function updateDebt(id, changes) {
   const db = await getDb();
-  const existing = await db.get('debts', id);
+  // Read and write share one transaction rather than being two separate
+  // implicit ones with an await gap between them — the same TOCTOU shape
+  // already found and fixed in categories.js, budgetRates.js, and
+  // transactions.js: two concurrent partial updates to the same row would
+  // otherwise both read the same pre-write snapshot and each overwrite the
+  // other's field when they land.
+  const tx = db.transaction('debts', 'readwrite');
+  const existing = await tx.store.get(id);
   if (!existing) throw new Error(`Debt ${id} not found`);
   const updated = { ...existing, ...changes };
-  await db.put('debts', updated);
+  await tx.store.put(updated);
+  await tx.done;
   return updated;
 }
 

@@ -36,6 +36,17 @@ describe('createCategory / getChildren', () => {
     const children = await getChildren(parent.id);
     expect(children.map((c) => c.id)).toEqual([child.id]);
   });
+
+  it('getChildren(null) returns root categories, not every non-root one', async () => {
+    // IndexedDB never indexes a record whose indexed field is null, so a
+    // naive getAllFromIndex(..., null) silently returns the wrong set
+    // instead of an empty one — this pins the explicit guard against that.
+    const root = await createCategory({ name: 'Еда', emoji: '🍔' });
+    const nested = await createCategory({ name: 'Продукты', emoji: '🛒', parentId: root.id });
+    const roots = await getChildren(null);
+    expect(roots.map((c) => c.id)).toEqual([root.id]);
+    expect(roots.map((c) => c.id)).not.toContain(nested.id);
+  });
 });
 
 describe('archiveCategory', () => {

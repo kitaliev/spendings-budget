@@ -14,22 +14,42 @@ export async function listCategories() {
 
 export async function getChildren(parentId) {
   const db = await getDb();
+  // IndexedDB never indexes a record whose indexed field is `null` (root
+  // categories all have parentId: null), and idb's getAllFromIndex(..., null)
+  // collapses to "no filter" rather than "match null" — so without this
+  // guard, getChildren(null) would silently return every non-root category
+  // instead of the roots. Handled here so any caller can rely on parentId's
+  // documented nullable semantics without knowing that IDB quirk.
+  if (parentId === null) {
+    const all = await db.getAll('categories');
+    return all.filter((c) => c.parentId === null);
+  }
   return db.getAllFromIndex('categories', 'parentId', parentId);
 }
 
-async function collectSubtreeIds(db, rootId) {
+// Hard-deletes id and its entire subtree, plus every transaction belonging
+// to any of them. Irreversible — the caller (Settings' category tree) is
+// responsible for confirming with the user first.
+async function collectSubtreeIds(store, rootId) {
   const ids = [rootId];
-  const children = await db.getAllFromIndex('categories', 'parentId', rootId);
+  const children = await store.index('parentId').getAll(rootId);
   for (const child of children) {
-    ids.push(...(await collectSubtreeIds(db, child.id)));
+    ids.push(...(await collectSubtreeIds(store, child.id)));
   }
   return ids;
 }
 
+// Soft: flips archived on id and its whole subtree, touches no other data.
+// Reversible in principle (nothing un-sets it yet, but no row is destroyed).
 export async function archiveCategory(id) {
   const db = await getDb();
-  const ids = await collectSubtreeIds(db, id);
   const tx = db.transaction('categories', 'readwrite');
+  // Collecting the subtree through the same transaction that then writes to
+  // it (rather than a separate read via the plain db handle beforehand)
+  // closes a TOCTOU gap: any other readwrite transaction touching
+  // `categories` queues behind this one until tx.done, so a category
+  // created/reparented mid-walk can't slip in uncounted.
+  const ids = await collectSubtreeIds(tx.store, id);
   for (const catId of ids) {
     const category = await tx.store.get(catId);
     if (category) await tx.store.put({ ...category, archived: true });
@@ -39,12 +59,12 @@ export async function archiveCategory(id) {
 
 export async function deleteCategory(id) {
   const db = await getDb();
-  const categoryIds = await collectSubtreeIds(db, id);
   const tx = db.transaction(['categories', 'transactions'], 'readwrite');
-  const txStore = tx.objectStore('transactions');
-  const txByCategory = txStore.index('categoryId');
-  for (const catId of categoryIds) {
-    await tx.objectStore('categories').delete(catId);
+  const categoriesStore = tx.objectStore('categories');
+  const ids = await collectSubtreeIds(categoriesStore, id);
+  const txByCategory = tx.objectStore('transactions').index('categoryId');
+  for (const catId of ids) {
+    await categoriesStore.delete(catId);
     let cursor = await txByCategory.openCursor(catId);
     while (cursor) {
       await cursor.delete();

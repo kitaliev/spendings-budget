@@ -57,3 +57,37 @@ describe('useCategoriesStore.archive', () => {
     expect(categoriesDb.listCategories).toHaveBeenCalled();
   });
 });
+
+describe('useCategoriesStore.remove', () => {
+  it('delegates to the db layer and reloads', async () => {
+    categoriesDb.listCategories.mockResolvedValue([]);
+    categoriesDb.deleteCategory.mockResolvedValue(undefined);
+    const store = useCategoriesStore();
+    await store.remove('1');
+    expect(categoriesDb.deleteCategory).toHaveBeenCalledWith('1');
+    expect(categoriesDb.listCategories).toHaveBeenCalled();
+  });
+});
+
+describe('useCategoriesStore.create', () => {
+  it('appends the created category to items', async () => {
+    categoriesDb.createCategory.mockResolvedValue({
+      id: '2', name: 'Здоровье', emoji: '💊', parentId: null, archived: false,
+    });
+    const store = useCategoriesStore();
+    await store.create({ name: 'Здоровье', emoji: '💊' });
+    expect(store.items.map((c) => c.id)).toEqual(['2']);
+  });
+});
+
+describe('useCategoriesStore.byId', () => {
+  it('finds a category by id, including an archived one', async () => {
+    categoriesDb.listCategories.mockResolvedValue([
+      { id: '1', name: 'Старое', emoji: '📦', parentId: null, archived: true },
+    ]);
+    const store = useCategoriesStore();
+    await store.load();
+    expect(store.byId('1')).toMatchObject({ name: 'Старое' });
+    expect(store.byId('missing')).toBeUndefined();
+  });
+});

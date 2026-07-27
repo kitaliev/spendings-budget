@@ -29,6 +29,7 @@
 
 <script>
 import { formatMoney } from '../../utils/currency.js';
+import { monthNameWithYear } from '../../utils/date.js';
 
 export default {
   name: 'MonthChart',
@@ -65,9 +66,7 @@ export default {
     // — see the aria-hidden note on the template's label span for why that
     // letter alone isn't enough for a screen-reader user.
     monthLabel(month) {
-      const [year, monthNum] = month.key.split('-').map(Number);
-      const rawName = new Date(year, monthNum - 1, 1).toLocaleDateString('ru-RU', { month: 'long' });
-      const heading = `${rawName.charAt(0).toUpperCase()}${rawName.slice(1)} ${year}`;
+      const heading = monthNameWithYear(month.key);
       if (month.empty) return `${heading}, ещё не наступил`;
       const amount = formatMoney(month.total);
       return month.negative ? `${heading}, перерасход, ${amount}` : `${heading}, ${amount}`;
@@ -90,6 +89,13 @@ export default {
   }
 
   &__col {
+    // The shared button reset (_reset.scss) doesn't zero out padding, and
+    // Blink's UA default (padding: 1px 6px) halves this button's own content
+    // box at realistic column widths — which .month-chart__bar-wrap and
+    // .month-chart__bar (60% width, max-width: 14px) both size themselves
+    // relative to. Verified in a real browser: without this, the bar never
+    // gets wide enough to hit its own max-width cap.
+    padding: 0;
     display: flex;
     flex-direction: column;
     align-items: center;

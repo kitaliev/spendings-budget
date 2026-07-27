@@ -25,6 +25,17 @@ export function yesterdayKey() {
   return toDateKey(d);
 }
 
+// "Январь 2026" — the one Russian month-name format needed in more than one
+// place (MonthChart's aria-labels, BudgetDashboard's month heading). Built
+// via a local-time Date + toLocaleDateString rather than a hardcoded name
+// array, so there's a single source of truth instead of two independently
+// maintained lists that could quietly drift apart.
+export function monthNameWithYear(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  const name = new Date(year, month - 1, 1).toLocaleDateString('ru-RU', { month: 'long' });
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${year}`;
+}
+
 export function daysInMonth(monthKey) {
   const [y, m] = monthKey.split('-').map(Number);
   return new Date(y, m, 0).getDate();

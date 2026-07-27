@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { toDateKey, toMonthKey, todayKey, yesterdayKey, daysInMonth, daysElapsedInMonth } from './date.js';
+import { toDateKey, toMonthKey, todayKey, yesterdayKey, daysInMonth, daysElapsedInMonth, monthNameWithYear } from './date.js';
 
 describe('toDateKey', () => {
   it('formats a Date as YYYY-MM-DD', () => {
@@ -42,6 +42,18 @@ describe('todayKey / yesterdayKey', () => {
 describe('toMonthKey', () => {
   it('derives YYYY-MM from a date key', () => {
     expect(toMonthKey('2026-07-26')).toBe('2026-07');
+  });
+});
+
+describe('monthNameWithYear', () => {
+  it('capitalizes the Russian month name and appends the year', () => {
+    expect(monthNameWithYear('2026-01')).toBe('Январь 2026');
+  });
+
+  it('works for every month, not just ones without special-casing', () => {
+    expect(monthNameWithYear('2026-03')).toBe('Март 2026');
+    expect(monthNameWithYear('2026-08')).toBe('Август 2026');
+    expect(monthNameWithYear('2026-12')).toBe('Декабрь 2026');
   });
 });
 

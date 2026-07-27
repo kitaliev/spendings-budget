@@ -6,6 +6,10 @@ function toNumber(token) {
   return parseFloat(String(token).replace(',', '.')) || 0;
 }
 
+// Assumes `expression` alternates number/operator/number/... with no leading
+// or consecutive operators — ExpenseModal's onKey handler (the only caller)
+// refuses to append an operator when raw is empty or already ends in one, so
+// this never actually receives a string that breaks that shape.
 export function evaluateExpression(expression) {
   const tokens = tokenize(expression);
   if (tokens.length === 0) return 0;

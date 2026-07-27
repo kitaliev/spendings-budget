@@ -2412,6 +2412,9 @@ Expected: FAIL — module `./toast.js` does not exist.
 ```js
 import { defineStore } from 'pinia';
 
+// Module-level (not state): a setTimeout handle isn't serializable app state
+// and never needs to be reactive — it only exists to let a new show() cancel
+// a still-pending hide from a previous toast.
 let hideTimer = null;
 
 export const useToastStore = defineStore('toast', {
@@ -2453,6 +2456,17 @@ describe('Toast', () => {
     const wrapper = mount(Toast, { props: { message: 'Готово' } });
     expect(wrapper.find('.toast').text()).toBe('Готово');
   });
+
+  it('announces itself to assistive tech via a polite status live region', () => {
+    // Toast has no focus target and disappears on its own timer — without
+    // role="status" + aria-live, a screen-reader user gets no signal it
+    // appeared at all.
+    const wrapper = mount(Toast, { props: { message: 'Готово' } });
+    const toast = wrapper.find('.toast');
+    expect(toast.attributes('role')).toBe('status');
+    expect(toast.attributes('aria-live')).toBe('polite');
+    expect(toast.attributes('aria-atomic')).toBe('true');
+  });
 });
 ```
 
@@ -2466,7 +2480,7 @@ Expected: FAIL — module `./Toast.vue` does not exist.
 ```vue
 <template>
   <Transition name="toast">
-    <div v-if="message" class="toast">{{ message }}</div>
+    <div v-if="message" class="toast" role="status" aria-live="polite" aria-atomic="true">{{ message }}</div>
   </Transition>
 </template>
 
@@ -2484,9 +2498,17 @@ export default {
 
 <style lang="scss">
 .toast {
+  // Rendered inside .app-shell__tabs (see Task 25), a non-scrolling wrapper
+  // shared with TabBar. bottom: 100% + margin-bottom sits it just above that
+  // wrapper's top edge — i.e. just above TabBar's actual rendered height,
+  // whatever that emergently turns out to be — without ever needing to know
+  // that height as a number. A guessed pixel constant was tried first and
+  // measurably wrong (real TabBar height ≠ the guess); anchoring to the
+  // wrapper's own top edge is exact by construction instead of by estimate.
   position: absolute;
   left: 50%;
-  bottom: 28px;
+  bottom: 100%;
+  margin-bottom: 12px;
   transform: translateX(-50%);
   background: var(--ink);
   color: var(--ground);
@@ -2514,7 +2536,9 @@ export default {
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/components/layout/Toast.spec.js`
-Expected: PASS (2 tests).
+Expected: PASS (3 tests).
+
+**Note:** `Toast` renders standalone here, so this step's manual/automated check can only confirm it mounts — it has no positioned ancestor yet to anchor `bottom: 100%` against. That containing-block wrapper (`.app-shell__tabs`) is introduced in Task 25, which is also where this component gets composed next to `TabBar` for real. Task 25's plan text already reflects the corrected structure — do not reintroduce a flat, un-wrapped `<TabBar/><Toast/>` sibling pair there.
 
 - [ ] **Step 9: Commit**
 
@@ -5208,10 +5232,15 @@ Expected: FAIL — the placeholder `App.vue` from Task 1 has none of this wiring
 ```vue
 <template>
   <div id="app-shell" class="app-shell">
-    <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
-    <DebtsScreen v-else />
+    <div class="app-shell__content">
+      <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
+      <DebtsScreen v-else />
+    </div>
 
-    <TabBar :active-tab="activeTab" @update:active-tab="activeTab = $event" @add-expense="openAddModal" />
+    <div class="app-shell__tabs">
+      <Toast :message="toastStore.message" />
+      <TabBar :active-tab="activeTab" @update:active-tab="activeTab = $event" @add-expense="openAddModal" />
+    </div>
 
     <template v-if="showSettings">
       <SettingsScreen class="app-shell__settings-overlay" />
@@ -5223,8 +5252,6 @@ Expected: FAIL — the placeholder `App.vue` from Task 1 has none of this wiring
       :editing-transaction="editingTransaction"
       @close="closeExpenseModal"
     />
-
-    <Toast :message="toastStore.message" />
   </div>
 </template>
 
@@ -5285,6 +5312,24 @@ export default {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+
+  // The two flex children below split "scrolls" from "doesn't scroll". Toast
+  // must live in the latter: position: absolute inside an overflow-y: auto
+  // ancestor scrolls away with that ancestor's content (verified in a real
+  // browser — it does NOT behave like position: fixed), which is wrong for a
+  // transient notification that should stay visible regardless of dashboard
+  // scroll position.
+  &__content {
+    flex: 1;
+    position: relative;
+    overflow-y: auto;
+    min-height: 0; // lets this child actually shrink/scroll instead of stretching .app-shell
+  }
+
+  &__tabs {
+    position: relative; // containing block for Toast's `bottom: 100%`
+    flex-shrink: 0;
+  }
 
   &__settings-overlay {
     position: absolute;

@@ -34,6 +34,13 @@ describe('evaluateExpression', () => {
     expect(evaluateExpression('120+')).toBe(120);
   });
 
+  it('ignores a trailing × the same way, not just + and ÷', () => {
+    // × has no identity-element coincidence like + (0) or ÷ (its own
+    // zero-guard) to fall back on — this only holds because normalize()
+    // strips a trailing operator uniformly before evaluation runs.
+    expect(evaluateExpression('120×')).toBe(120);
+  });
+
   it('drops a leading operator rather than misreading token positions', () => {
     expect(evaluateExpression('−5')).toBe(5);
   });

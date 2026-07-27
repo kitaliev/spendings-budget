@@ -8,12 +8,18 @@ function toNumber(token) {
   return parseFloat(String(token).replace(',', '.')) || 0;
 }
 
-// Collapses a token stream into strict number/operator/number/... alternation:
-// a leading operator has nothing to apply to yet and is dropped; consecutive
-// operators keep only the most recent one (the "changed my mind" calculator
-// convention — tapping × right after + replaces the pending + rather than
-// both being applied). Keeps evaluateExpression itself correct on any input
-// shape, independent of what any caller does or doesn't guarantee about raw.
+// Collapses a token stream into strict number/operator/number/.../number
+// alternation (or []): a leading or trailing operator has nothing on one
+// side to apply to and is dropped; consecutive operators keep only the most
+// recent one (the "changed my mind" calculator convention — tapping ×
+// right after + replaces the pending + rather than both being applied).
+// Guaranteeing this shape up front means the two passes below never need to
+// guess at a missing operand — "operator with nothing to apply to" is
+// handled uniformly here instead of leaking into each operator's own
+// incidental math (0 being the +/− identity is not a substitute for this:
+// it left a trailing × silently zeroing the result). Keeps evaluateExpression
+// correct on any input shape, independent of what any caller does or
+// doesn't guarantee about raw.
 function normalize(tokens) {
   const result = [];
   for (const token of tokens) {
@@ -25,6 +31,9 @@ function normalize(tokens) {
       }
     }
     result.push(token);
+  }
+  if (result.length && OPERATORS.includes(result[result.length - 1])) {
+    result.pop();
   }
   return result;
 }
@@ -43,11 +52,12 @@ export function evaluateExpression(expression) {
   const tokens = normalize(tokenize(expression));
   if (tokens.length === 0) return 0;
 
-  // Pass 1: resolve × and ÷ left to right.
+  // Pass 1: resolve × and ÷ left to right. `normalize` guarantees the array
+  // ends on a number, so tokens[i + 1] is always defined here.
   const afterMulDiv = [toNumber(tokens[0])];
   for (let i = 1; i < tokens.length; i += 2) {
     const operator = tokens[i];
-    const operand = toNumber(tokens[i + 1] ?? '0');
+    const operand = toNumber(tokens[i + 1]);
     if (operator === '×' || operator === '÷') {
       const previous = afterMulDiv.pop();
       afterMulDiv.push(

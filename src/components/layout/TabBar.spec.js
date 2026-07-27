@@ -16,6 +16,13 @@ describe('TabBar', () => {
     expect(items[0].classes()).not.toContain('tab-bar__item--active');
   });
 
+  it('exposes the active tab to assistive tech via aria-current, not color alone', () => {
+    const wrapper = mount(TabBar, { props: { activeTab: 'debts' } });
+    const items = wrapper.findAll('.tab-bar__item');
+    expect(items[1].attributes('aria-current')).toBe('page');
+    expect(items[0].attributes('aria-current')).toBeUndefined();
+  });
+
   it('emits update:active-tab with the tab id when clicked', async () => {
     const wrapper = mount(TabBar, { props: { activeTab: 'budget' } });
     await wrapper.findAll('.tab-bar__item')[1].trigger('click');

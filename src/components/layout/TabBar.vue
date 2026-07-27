@@ -3,13 +3,15 @@
     <button
       v-for="tab in tabs"
       :key="tab.id"
+      type="button"
       class="tab-bar__item"
       :class="{ 'tab-bar__item--active': tab.id === activeTab }"
+      :aria-current="tab.id === activeTab ? 'page' : null"
       @click="$emit('update:active-tab', tab.id)"
     >
-      <span class="tab-bar__icon">{{ tab.icon }}</span>{{ tab.label }}
+      <span class="tab-bar__icon" aria-hidden="true">{{ tab.icon }}</span>{{ tab.label }}
     </button>
-    <button class="tab-bar__fab" aria-label="Добавить расход" @click="$emit('add-expense')">+</button>
+    <button type="button" class="tab-bar__fab" aria-label="Добавить расход" @click="$emit('add-expense')">+</button>
   </nav>
 </template>
 
@@ -45,9 +47,11 @@ export default {
 
   &__item {
     flex: 1;
+    min-height: 44px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 3px;
     padding: 6px 0;
     color: var(--ink-muted);
@@ -66,6 +70,7 @@ export default {
 
   &__fab {
     position: absolute;
+    z-index: 1;
     right: 16px;
     top: -24px;
     width: 48px;

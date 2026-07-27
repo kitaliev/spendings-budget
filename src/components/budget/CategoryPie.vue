@@ -124,6 +124,12 @@ export default {
   margin-bottom: 8px;
 
   &__back {
+    // Explicit, not just inherited — the shared button reset doesn't zero
+    // padding, and this project has already shipped one real bug (MonthChart)
+    // from a button's UA-default padding silently eating into a percentage-
+    // sized child. Nothing here is percentage-sized against this box today,
+    // so it's not live, but it's free to close off.
+    padding: 0;
     display: inline-flex;
     align-items: center;
     gap: 4px;

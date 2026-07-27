@@ -38,6 +38,28 @@ describe('ExpenseModal — adding a new expense', () => {
     );
   });
 
+  it('rounds an amount that does not evaluate to a whole number', async () => {
+    // Splitting a shared cost (e.g. "1000÷3") is ordinary use of a
+    // calculator-style amount field — the stored/committed amount must not
+    // carry raw float noise.
+    transactionsDb.createTransaction.mockResolvedValue({ id: 't1', amount: 333, date: '2026-07-27', categoryId: 'fun' });
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    for (const key of ['1', '0', '0', '0', '÷', '3']) await findKey(wrapper, key).trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click');
+    expect(transactionsDb.createTransaction).toHaveBeenCalledWith(expect.objectContaining({ amount: 333 }));
+  });
+
+  it('replaces a pending operator when a different one is tapped, instead of ignoring the new tap', async () => {
+    // Matches calculator.js's own normalize(), built specifically to
+    // collapse consecutive operators to the most recent one (the "changed
+    // my mind" convention) — this is the only real caller of that function.
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    await findKey(wrapper, '+').trigger('click');
+    await findKey(wrapper, '×').trigger('click');
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5×');
+  });
+
   it('does nothing when a category is tapped with no amount entered', async () => {
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
     await wrapper.find('.category-picker__row').trigger('click');
@@ -85,6 +107,53 @@ describe('ExpenseModal — adding a new expense', () => {
     await flushPromises();
     expect(transactionsDb.createTransaction).toHaveBeenCalledTimes(1);
   });
+
+  it('ignores keypad taps while a commit is still in flight, instead of merging with the stale reset', async () => {
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click'); // commit in flight
+    await findKey(wrapper, '7').trigger('click'); // typing during the gap — must be a no-op
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5');
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await flushPromises();
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0'); // clean reset, no leftover "7"
+  });
+});
+
+describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent instance and only swaps props)', () => {
+  it('does not apply a stale commit\'s reset once a different session has taken over', async () => {
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click'); // add-mode commit in flight
+
+    const otherTransaction = { id: 't9', amount: 300, date: '2026-07-01', categoryId: 'fun' };
+    await wrapper.setProps({ editingTransaction: otherTransaction });
+
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await flushPromises();
+    // The now-active edit session's pre-filled amount must survive untouched.
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('300');
+  });
+
+  it('does not crash resolving a commit after the sheet was closed mid-write', async () => {
+    // Awaits commit()'s own returned promise directly (rather than going
+    // through the DOM event + flushPromises) so a thrown error surfaces as
+    // this assertion failing, not as a side-channel "unhandled rejection"
+    // that a plain flushPromises()-based test would silently let through.
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    const commitPromise = wrapper.vm.commit({ id: 'fun', name: 'Развлечения', emoji: '🎬' });
+    await wrapper.setProps({ visible: false }); // sheet, and CategoryPicker with it, unmounts
+
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await expect(commitPromise).resolves.toBeUndefined();
+  });
 });
 
 describe('ExpenseModal — editing an existing expense', () => {
@@ -121,5 +190,15 @@ describe('ExpenseModal — dismissing', () => {
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
     await wrapper.find('.expense-modal__close').trigger('click');
     expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+});
+
+describe('ExpenseModal — accessibility', () => {
+  it('carries dialog semantics for assistive tech, since it is a full-screen modal sheet', () => {
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    const dialog = wrapper.find('.expense-modal');
+    expect(dialog.attributes('role')).toBe('dialog');
+    expect(dialog.attributes('aria-modal')).toBe('true');
+    expect(dialog.attributes('aria-labelledby')).toBe('expense-modal-title');
   });
 });

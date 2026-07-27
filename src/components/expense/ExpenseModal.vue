@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible" class="expense-modal">
+  <div v-if="visible" class="expense-modal" role="dialog" aria-modal="true" aria-labelledby="expense-modal-title">
     <div class="expense-modal__backdrop"></div>
     <div class="expense-modal__sheet">
       <div class="expense-modal__handle-row">
@@ -8,7 +8,7 @@
       </div>
 
       <div class="expense-modal__entry">
-        <p class="expense-modal__entry-label">Сумма расхода</p>
+        <p id="expense-modal-title" class="expense-modal__entry-label">Сумма расхода</p>
         <div class="expense-modal__entry-value">{{ raw || '0' }}</div>
       </div>
 
@@ -75,20 +75,36 @@ export default {
   },
   methods: {
     onKey(key) {
+      // A write started by a previous commit/delete can still be in flight
+      // (see commit()/onDelete()) with nothing else in the UI disabled
+      // meanwhile — without this guard, typing a new amount during that gap
+      // silently merges with whatever the stale commit resets `raw` to once
+      // it resolves.
+      if (this.submitting) return;
       if (key === 'del') {
         this.raw = this.raw.slice(0, -1);
       } else if (key === ',') {
         const lastNumber = this.raw.split(/[+\-−×÷]/).pop();
         if (!lastNumber.includes(',')) this.raw += ',';
       } else if (['+', '−', '×', '÷'].includes(key)) {
-        if (this.raw && !/[+\-−×÷]$/.test(this.raw)) this.raw += key;
+        if (!this.raw) return;
+        // Tapping a second operator replaces the pending one (the "changed
+        // my mind" convention — matches calculator.js's own normalize(),
+        // which was built specifically to collapse consecutive operators
+        // this way; dropping the new tap instead would leave that behavior
+        // unreachable through the app's only real caller).
+        this.raw = /[+\-−×÷]$/.test(this.raw) ? this.raw.slice(0, -1) + key : this.raw + key;
       } else {
         this.raw += key;
       }
     },
     async commit(category) {
       if (!this.raw || this.submitting) return;
-      const amount = evaluateExpression(this.raw);
+      // Dividing to split a shared cost (e.g. "1000÷3") is ordinary use of a
+      // calculator-style amount field — round to whole rubles here, the same
+      // place the amount<=0 business rule below lives, rather than storing
+      // and later re-displaying raw float noise.
+      const amount = Math.round(evaluateExpression(this.raw));
       const toast = useToastStore();
       if (amount <= 0) {
         // Reachable through completely ordinary keypad input, not just a
@@ -101,23 +117,34 @@ export default {
         return;
       }
       this.submitting = true;
+      // Snapshot which session (this specific edit target, or this specific
+      // add session) the write below is for. App.vue keeps one persistent
+      // ExpenseModal instance and only swaps its props, so by the time the
+      // await resolves the user could have closed the sheet, or reopened it
+      // for a different transaction entirely — applying this commit's
+      // completion side effects (closing, resetting, touching the picker)
+      // onto that unrelated later session would be wrong, and the picker
+      // itself may no longer even be mounted (visible could now be false).
+      const session = this.editingTransaction;
       try {
         const transactionsStore = useTransactionsStore();
 
-        if (this.editingTransaction) {
-          await transactionsStore.update(this.editingTransaction.id, {
+        if (session) {
+          await transactionsStore.update(session.id, {
             amount,
             date: this.date,
             categoryId: category.id,
           });
           toast.show(`Изменено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-          this.close();
+          if (this.editingTransaction === session) this.close();
         } else {
           await transactionsStore.create({ amount, date: this.date, categoryId: category.id });
           toast.show(`Добавлено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-          this.raw = '';
-          this.date = todayKey();
-          this.$refs.picker.reset();
+          if (this.editingTransaction === session) {
+            this.raw = '';
+            this.date = todayKey();
+            this.$refs.picker?.reset();
+          }
         }
       } finally {
         this.submitting = false;
@@ -126,10 +153,11 @@ export default {
     async onDelete() {
       if (this.submitting) return;
       this.submitting = true;
+      const session = this.editingTransaction;
       try {
         const transactionsStore = useTransactionsStore();
-        await transactionsStore.remove(this.editingTransaction.id);
-        this.close();
+        await transactionsStore.remove(session.id);
+        if (this.editingTransaction === session) this.close();
       } finally {
         this.submitting = false;
       }

@@ -1,0 +1,186 @@
+<template>
+  <div class="category-pie">
+    <p class="category-pie__title">{{ stack.length ? 'Подкатегории' : 'Расход по категориям' }}</p>
+    <button v-if="stack.length" type="button" class="category-pie__back" @click="back">
+      <span aria-hidden="true">‹</span> Назад ко всем категориям
+    </button>
+
+    <!-- Every amount/percentage on this chart is already in the legend below
+         as text — this circle is redundant visual reinforcement, same as
+         MonthChart's bare letter or TabBar's icon, so it's hidden from
+         assistive tech rather than left as an unlabeled, contentless stop. -->
+    <div class="category-pie__chart" :style="{ background: gradient }" aria-hidden="true"></div>
+
+    <div class="category-pie__legend">
+      <button
+        v-for="row in rows"
+        :key="row.category.id"
+        type="button"
+        class="category-pie__legend-item"
+        :disabled="!row.hasChildren"
+        @click="drillInto(row.category)"
+      >
+        <span class="category-pie__swatch" :style="{ background: row.color }"></span>
+        <span class="category-pie__emoji">{{ row.category.emoji }}</span>
+        <span class="category-pie__name">{{ row.category.name }}</span>
+        <span class="category-pie__pct">{{ row.pct }}%</span>
+        <span class="category-pie__amount">{{ formatMoney(row.amount) }}</span>
+      </button>
+    </div>
+  </div>
+</template>
+
+<script>
+import { useCategoriesStore } from '../../stores/categories.js';
+import { useTransactionsStore } from '../../stores/transactions.js';
+import { formatMoney } from '../../utils/currency.js';
+
+const PALETTE = ['var(--cat-1)', 'var(--cat-2)', 'var(--cat-3)', 'var(--cat-4)', 'var(--cat-5)', 'var(--cat-6)'];
+
+export default {
+  name: 'CategoryPie',
+  props: {
+    monthKey: {
+      type: String,
+      required: true,
+    },
+  },
+  data() {
+    return {
+      stack: [],
+    };
+  },
+  computed: {
+    categoriesStore() {
+      return useCategoriesStore();
+    },
+    transactionsStore() {
+      return useTransactionsStore();
+    },
+    currentLevel() {
+      const parentId = this.stack.length ? this.stack[this.stack.length - 1] : null;
+      return parentId === null
+        ? this.categoriesStore.rootCategories
+        : this.categoriesStore.childrenOf(parentId);
+    },
+    rows() {
+      const total = this.currentLevel.reduce((sum, category) => sum + this.amountFor(category), 0);
+      return this.currentLevel.map((category, index) => {
+        const amount = this.amountFor(category);
+        return {
+          category,
+          amount,
+          pct: total ? Math.round((amount / total) * 100) : 0,
+          color: PALETTE[index % PALETTE.length],
+          hasChildren: this.categoriesStore.childrenOf(category.id).length > 0,
+        };
+      });
+    },
+    gradient() {
+      const total = this.rows.reduce((sum, row) => sum + row.amount, 0);
+      let acc = 0;
+      const stops = this.rows.map((row) => {
+        const start = total ? (acc / total) * 100 : 0;
+        acc += row.amount;
+        const end = total ? (acc / total) * 100 : 0;
+        return `${row.color} ${start}% ${end}%`;
+      });
+      return stops.length ? `conic-gradient(${stops.join(', ')})` : 'var(--surface-raised)';
+    },
+  },
+  watch: {
+    monthKey() {
+      this.stack = [];
+    },
+  },
+  methods: {
+    formatMoney,
+    // Sums this category's own transactions plus every descendant's, since
+    // only leaf categories ever receive direct transactions and a parent's
+    // slice must represent its whole subtree. subtreeIds is the categories
+    // store's getter (pure category-tree shape), kept there rather than
+    // reimplemented here so any other consumer needing "this category plus
+    // everything under it" doesn't have to re-derive the same walk.
+    amountFor(category) {
+      const ids = this.categoriesStore.subtreeIds(category.id);
+      return this.transactionsStore.items
+        .filter((t) => t.date.startsWith(this.monthKey) && ids.includes(t.categoryId))
+        .reduce((sum, t) => sum + t.amount, 0);
+    },
+    drillInto(category) {
+      if (this.categoriesStore.childrenOf(category.id).length > 0) {
+        this.stack.push(category.id);
+      }
+    },
+    back() {
+      this.stack.pop();
+    },
+  },
+};
+</script>
+
+<style lang="scss">
+.category-pie {
+  margin-bottom: 8px;
+
+  &__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-strong);
+    margin-bottom: 10px;
+  }
+
+  &__chart {
+    width: 118px;
+    height: 118px;
+    border-radius: 50%;
+    margin-bottom: 16px;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+
+  &__legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 6px;
+    border-radius: 10px;
+    width: 100%;
+    text-align: left;
+
+    &:disabled {
+      cursor: default;
+      pointer-events: none;
+    }
+  }
+
+  &__swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex: 0 0 auto;
+  }
+
+  &__name {
+    flex: 1 1 auto;
+    font-size: 14px;
+  }
+
+  &__pct {
+    font-size: 12px;
+    color: var(--ink-muted);
+    width: 38px;
+    text-align: right;
+  }
+
+  &__amount {
+    font-family: var(--font-money);
+    font-size: 13px;
+    color: var(--ink-secondary);
+    width: 74px;
+    text-align: right;
+  }
+}
+</style>

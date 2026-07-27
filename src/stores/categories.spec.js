@@ -47,6 +47,30 @@ describe('useCategoriesStore.childrenOf', () => {
   });
 });
 
+describe('useCategoriesStore.subtreeIds', () => {
+  it('returns a category id plus every descendant id, however deeply nested', async () => {
+    categoriesDb.listCategories.mockResolvedValue([
+      { id: '1', name: 'Еда', emoji: '🍔', parentId: null, archived: false },
+      { id: '2', name: 'Продукты', emoji: '🛒', parentId: '1', archived: false },
+      { id: '3', name: 'Кафе', emoji: '☕', parentId: '1', archived: false },
+      { id: '5', name: 'Латте', emoji: '🥛', parentId: '3', archived: false },
+      { id: '4', name: 'Развлечения', emoji: '🎬', parentId: null, archived: false },
+    ]);
+    const store = useCategoriesStore();
+    await store.load();
+    expect(store.subtreeIds('1')).toEqual(['1', '2', '3', '5']);
+  });
+
+  it('returns just the category itself when it is a leaf', async () => {
+    categoriesDb.listCategories.mockResolvedValue([
+      { id: '4', name: 'Развлечения', emoji: '🎬', parentId: null, archived: false },
+    ]);
+    const store = useCategoriesStore();
+    await store.load();
+    expect(store.subtreeIds('4')).toEqual(['4']);
+  });
+});
+
 describe('useCategoriesStore.archive', () => {
   it('delegates to the db layer and reloads', async () => {
     categoriesDb.listCategories.mockResolvedValue([]);

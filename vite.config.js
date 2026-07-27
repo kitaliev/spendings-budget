@@ -3,6 +3,14 @@ import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  css: {
+    preprocessorOptions: {
+      scss: {
+        api: 'modern',
+        loadPaths: ['src/styles'],
+      },
+    },
+  },
   plugins: [
     vue(),
     VitePWA({

@@ -6,6 +6,7 @@
       type="button"
       class="keypad__key"
       :class="{ 'keypad__key--op': key.type === 'op', 'keypad__key--del': key.type === 'del' }"
+      :aria-label="key.ariaLabel || null"
       @click="$emit('key', key.value)"
     >{{ key.label }}</button>
   </div>
@@ -21,7 +22,7 @@ export default {
         { value: '7', label: '7' }, { value: '8', label: '8' }, { value: '9', label: '9' }, { value: '÷', label: '÷', type: 'op' },
         { value: '4', label: '4' }, { value: '5', label: '5' }, { value: '6', label: '6' }, { value: '×', label: '×', type: 'op' },
         { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '−', label: '−', type: 'op' },
-        { value: ',', label: ',' }, { value: '0', label: '0' }, { value: 'del', label: '⌫', type: 'del' }, { value: '+', label: '+', type: 'op' },
+        { value: ',', label: ',' }, { value: '0', label: '0' }, { value: 'del', label: '⌫', type: 'del', ariaLabel: 'Стереть' }, { value: '+', label: '+', type: 'op' },
       ],
     };
   },

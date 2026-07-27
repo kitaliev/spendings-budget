@@ -32,4 +32,10 @@ describe('Keypad', () => {
     expect(keys[3].classes()).toContain('keypad__key--op'); // ÷
     expect(keys[0].classes()).not.toContain('keypad__key--op'); // 7
   });
+
+  it('labels the delete key for assistive tech, since ⌫ alone has no guaranteed spoken reading', () => {
+    const wrapper = mount(Keypad);
+    const keys = wrapper.findAll('.keypad__key');
+    expect(keys[14].attributes('aria-label')).toBe('Стереть');
+  });
 });

@@ -2966,6 +2966,14 @@ describe('DatePicker', () => {
     await wrapper.find('.date-row__native').setValue('2026-07-10');
     expect(wrapper.emitted('update:modelValue').at(-1)).toEqual(['2026-07-10']);
   });
+
+  it('shows the formatted date on the native button when mounted directly with an "other" date, before any change event fires', () => {
+    // Covers the edit-existing-transaction case (Task 17): the label must be
+    // correct on first render, not only after the user interacts with the
+    // native input themselves.
+    const wrapper = mount(DatePicker, { props: { modelValue: '2026-07-01' } });
+    expect(wrapper.findAll('.date-row__btn')[2].text()).toBe('1 июл.');
+  });
 });
 ```
 
@@ -3008,16 +3016,23 @@ export default {
     },
   },
   emits: ['update:modelValue'],
-  data() {
-    return {
-      otherLabel: 'Другая дата',
-    };
-  },
   computed: {
     mode() {
       if (this.modelValue === todayKey()) return 'today';
       if (this.modelValue === yesterdayKey()) return 'yesterday';
       return 'other';
+    },
+    otherLabel() {
+      // Derived from modelValue, not tracked as separate mutable state — it
+      // must render correctly the instant this component mounts with an
+      // existing "other" date (e.g. Task 17 editing a past transaction), not
+      // only after the native input's own change handler has fired once.
+      if (this.mode !== 'other') return 'Другая дата';
+      // Build the label from local-time parts, not `new Date(value)` — a bare
+      // YYYY-MM-DD string parses as UTC midnight and can render one day off
+      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
+      const [y, m, d] = this.modelValue.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
     },
   },
   methods: {
@@ -3026,11 +3041,6 @@ export default {
     onNativeChange(event) {
       const value = event.target.value;
       if (!value) return;
-      // Build the label from local-time parts, not `new Date(value)` — a bare
-      // YYYY-MM-DD string parses as UTC midnight and can render one day off
-      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
-      const [y, m, d] = value.split('-').map(Number);
-      this.otherLabel = new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
       this.$emit('update:modelValue', value);
     },
   },
@@ -3061,6 +3071,17 @@ export default {
       color: var(--accent-strong);
       border-color: var(--accent);
     }
+
+    // The third pill is a <label>, not a <button> — the global
+    // button:focus-visible rule (_reset.scss) never matches it. Its real
+    // control is the input below, whose own focus outline is invisible
+    // (opacity: 0 suppresses it along with everything else), so without
+    // this, Tab-cycling to the native date input shows no focus indicator
+    // at all.
+    &:focus-within {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
   }
 
   &__native {
@@ -3068,6 +3089,7 @@ export default {
     inset: 0;
     opacity: 0;
     width: 100%;
+    height: 100%;
     cursor: pointer;
   }
 }
@@ -3077,7 +3099,9 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/DatePicker.spec.js`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
+
+**Verified in a real browser (not just jsdom):** the invisible native input's hit area covers the whole visible pill — `elementFromPoint` at all four corners and the center of the label all resolve to the input, not just its center — and the `:focus-within` outline renders at the correct size/color when the input is focused. This class of bug (CSS that unit tests can't see) has bitten this project twice before (MonthNav's hit-slop, Toast's position), so it's worth this quick check rather than trusting the CSS by inspection alone.
 
 - [ ] **Step 5: Commit**
 

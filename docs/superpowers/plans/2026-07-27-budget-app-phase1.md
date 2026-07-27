@@ -3120,6 +3120,8 @@ git commit -m "feat: add DatePicker component"
 
 Composes Keypad + DatePicker + CategoryPicker. Per spec §8: closing without input never loses a half-typed amount (handled by the parent controlling `visible` — swipe/backdrop-tap wiring happens in Task 24's App.vue, not here). Committing in **add** mode resets and stays open for rapid consecutive entries; committing in **edit** mode closes.
 
+**Important architectural fact driving several fixes below:** App.vue (Task 25) keeps ONE persistent `<ExpenseModal>` instance and only ever swaps its `visible`/`editing-transaction` props — it never remounts this component. That means a `commit()`/`onDelete()` write can still be in flight (awaiting an IndexedDB round trip) at the exact moment the user closes the sheet, or the parent hands it a different transaction to edit, or a different fresh "add" session. Nothing else in the UI becomes disabled during that gap, so this needs to be designed for from the start rather than patched in later.
+
 - [ ] **Step 1: Write the failing test**
 
 ```js
@@ -3139,6 +3141,7 @@ function findKey(wrapper, label) {
 
 beforeEach(() => {
   setActivePinia(createPinia());
+  vi.clearAllMocks();
   useCategoriesStore().items = [
     { id: 'fun', name: 'Развлечения', emoji: '🎬', parentId: null, archived: false },
   ];
@@ -3163,6 +3166,28 @@ describe('ExpenseModal — adding a new expense', () => {
     );
   });
 
+  it('rounds an amount that does not evaluate to a whole number', async () => {
+    // Splitting a shared cost (e.g. "1000÷3") is ordinary use of a
+    // calculator-style amount field — the stored/committed amount must not
+    // carry raw float noise.
+    transactionsDb.createTransaction.mockResolvedValue({ id: 't1', amount: 333, date: '2026-07-27', categoryId: 'fun' });
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    for (const key of ['1', '0', '0', '0', '÷', '3']) await findKey(wrapper, key).trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click');
+    expect(transactionsDb.createTransaction).toHaveBeenCalledWith(expect.objectContaining({ amount: 333 }));
+  });
+
+  it('replaces a pending operator when a different one is tapped, instead of ignoring the new tap', async () => {
+    // Matches calculator.js's own normalize(), built specifically to
+    // collapse consecutive operators to the most recent one (the "changed
+    // my mind" convention) — this is the only real caller of that function.
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    await findKey(wrapper, '+').trigger('click');
+    await findKey(wrapper, '×').trigger('click');
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5×');
+  });
+
   it('does nothing when a category is tapped with no amount entered', async () => {
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
     await wrapper.find('.category-picker__row').trigger('click');
@@ -3185,7 +3210,11 @@ describe('ExpenseModal — adding a new expense', () => {
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
     await findKey(wrapper, '5').trigger('click');
     await wrapper.find('.category-picker__row').trigger('click');
-    await wrapper.vm.$nextTick();
+    // The commit chain is two awaits deep (commit -> transactionsStore.create
+    // -> transactionsDb.createTransaction) before `raw` gets reset — a single
+    // $nextTick() doesn't reliably drain that; flushPromises() (a macrotask)
+    // does, same as the "ignores a second tap" case below.
+    await flushPromises();
     expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0');
     expect(wrapper.emitted('close')).toBeUndefined();
   });
@@ -3206,6 +3235,69 @@ describe('ExpenseModal — adding a new expense', () => {
     await flushPromises();
     expect(transactionsDb.createTransaction).toHaveBeenCalledTimes(1);
   });
+
+  it('ignores keypad taps while a commit is still in flight, instead of merging with the stale reset', async () => {
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click'); // commit in flight
+    await findKey(wrapper, '7').trigger('click'); // typing during the gap — must be a no-op
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5');
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await flushPromises();
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0'); // clean reset, no leftover "7"
+  });
+});
+
+describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent instance and only swaps props)', () => {
+  it('does not apply a stale commit\'s reset once a different session has taken over', async () => {
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    await wrapper.find('.category-picker__row').trigger('click'); // add-mode commit in flight
+
+    const otherTransaction = { id: 't9', amount: 300, date: '2026-07-01', categoryId: 'fun' };
+    await wrapper.setProps({ editingTransaction: otherTransaction });
+
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await flushPromises();
+    // The now-active edit session's pre-filled amount must survive untouched.
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('300');
+  });
+
+  it('does not crash resolving a commit after the sheet was closed mid-write', async () => {
+    // Awaits commit()'s own returned promise directly (rather than going
+    // through the DOM event + flushPromises) so a thrown error surfaces as
+    // this assertion failing, not as a side-channel "unhandled rejection"
+    // that a plain flushPromises()-based test would silently let through.
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    const commitPromise = wrapper.vm.commit({ id: 'fun', name: 'Развлечения', emoji: '🎬' });
+    await wrapper.setProps({ visible: false }); // sheet, and CategoryPicker with it, unmounts
+
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await expect(commitPromise).resolves.toBeUndefined();
+  });
+
+  it('does not clobber a date the user already picked for the next entry while a stale commit is still resolving', async () => {
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    const commitPromise = wrapper.vm.commit({ id: 'fun', name: 'Развлечения', emoji: '🎬' });
+    // DatePicker's own change handler is blocked by nothing during this gap
+    // (only the keypad is guarded) — simulate the user picking "Вчера" for
+    // whatever they type next, before the stale commit resolves.
+    await wrapper.findComponent({ name: 'DatePicker' }).vm.$emit('update:modelValue', '2026-07-26');
+
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await commitPromise;
+    expect(wrapper.vm.date).toBe('2026-07-26');
+  });
 });
 
 describe('ExpenseModal — editing an existing expense', () => {
@@ -3220,6 +3312,9 @@ describe('ExpenseModal — editing an existing expense', () => {
     transactionsDb.deleteTransaction.mockResolvedValue(undefined);
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction } });
     await wrapper.find('.expense-modal__delete').trigger('click');
+    // onDelete -> transactionsStore.remove -> transactionsDb.deleteTransaction
+    // is two awaits deep before close() fires; see flushPromises note above.
+    await flushPromises();
     expect(transactionsDb.deleteTransaction).toHaveBeenCalledWith('t1');
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
@@ -3228,7 +3323,26 @@ describe('ExpenseModal — editing an existing expense', () => {
     transactionsDb.updateTransaction.mockResolvedValue(editingTransaction);
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction } });
     await wrapper.find('.category-picker__row').trigger('click');
+    await flushPromises();
     expect(transactionsDb.updateTransaction).toHaveBeenCalledWith('t1', expect.objectContaining({ amount: 750 }));
+    expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  it('still closes when the store swaps editingTransaction for a same-id, different-reference object mid-write', async () => {
+    // transactionsStore.update() replaces the item in its own array with a
+    // new object (`this.items[index] = updated`) — if a future App.vue ever
+    // derives editingTransaction reactively from that array, the prop
+    // reference changes even though it's still logically the same edit
+    // session. Comparing by id (not `===`) is what keeps close() firing.
+    let resolveUpdate;
+    transactionsDb.updateTransaction.mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction } });
+    const commitPromise = wrapper.vm.commit({ id: 'fun', name: 'Развлечения', emoji: '🎬' });
+    const sameIdNewReference = { id: 't1', amount: 750, date: '2026-07-10', categoryId: 'fun' };
+    await wrapper.setProps({ editingTransaction: sameIdNewReference });
+
+    resolveUpdate(sameIdNewReference);
+    await commitPromise;
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
 });
@@ -3238,6 +3352,16 @@ describe('ExpenseModal — dismissing', () => {
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
     await wrapper.find('.expense-modal__close').trigger('click');
     expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+});
+
+describe('ExpenseModal — accessibility', () => {
+  it('carries dialog semantics for assistive tech, since it is a full-screen modal sheet', () => {
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    const dialog = wrapper.find('.expense-modal');
+    expect(dialog.attributes('role')).toBe('dialog');
+    expect(dialog.attributes('aria-modal')).toBe('true');
+    expect(dialog.attributes('aria-labelledby')).toBe('expense-modal-title');
   });
 });
 ```
@@ -3251,7 +3375,7 @@ Expected: FAIL — module `./ExpenseModal.vue` does not exist.
 
 ```vue
 <template>
-  <div v-if="visible" class="expense-modal">
+  <div v-if="visible" class="expense-modal" role="dialog" aria-modal="true" aria-labelledby="expense-modal-title">
     <div class="expense-modal__backdrop"></div>
     <div class="expense-modal__sheet">
       <div class="expense-modal__handle-row">
@@ -3260,7 +3384,7 @@ Expected: FAIL — module `./ExpenseModal.vue` does not exist.
       </div>
 
       <div class="expense-modal__entry">
-        <p class="expense-modal__entry-label">Сумма расхода</p>
+        <p id="expense-modal-title" class="expense-modal__entry-label">Сумма расхода</p>
         <div class="expense-modal__entry-value">{{ raw || '0' }}</div>
       </div>
 
@@ -3327,20 +3451,36 @@ export default {
   },
   methods: {
     onKey(key) {
+      // A write started by a previous commit/delete can still be in flight
+      // (see commit()/onDelete()) with nothing else in the UI disabled
+      // meanwhile — without this guard, typing a new amount during that gap
+      // silently merges with whatever the stale commit resets `raw` to once
+      // it resolves.
+      if (this.submitting) return;
       if (key === 'del') {
         this.raw = this.raw.slice(0, -1);
       } else if (key === ',') {
         const lastNumber = this.raw.split(/[+\-−×÷]/).pop();
         if (!lastNumber.includes(',')) this.raw += ',';
       } else if (['+', '−', '×', '÷'].includes(key)) {
-        if (this.raw && !/[+\-−×÷]$/.test(this.raw)) this.raw += key;
+        if (!this.raw) return;
+        // Tapping a second operator replaces the pending one (the "changed
+        // my mind" convention — matches calculator.js's own normalize(),
+        // which was built specifically to collapse consecutive operators
+        // this way; dropping the new tap instead would leave that behavior
+        // unreachable through the app's only real caller).
+        this.raw = /[+\-−×÷]$/.test(this.raw) ? this.raw.slice(0, -1) + key : this.raw + key;
       } else {
         this.raw += key;
       }
     },
     async commit(category) {
       if (!this.raw || this.submitting) return;
-      const amount = evaluateExpression(this.raw);
+      // Dividing to split a shared cost (e.g. "1000÷3") is ordinary use of a
+      // calculator-style amount field — round to whole rubles here, the same
+      // place the amount<=0 business rule below lives, rather than storing
+      // and later re-displaying raw float noise.
+      const amount = Math.round(evaluateExpression(this.raw));
       const toast = useToastStore();
       if (amount <= 0) {
         // Reachable through completely ordinary keypad input, not just a
@@ -3353,23 +3493,38 @@ export default {
         return;
       }
       this.submitting = true;
+      // Snapshot which session (this specific edit target, or this specific
+      // add session) the write below is for, and the date it was committed
+      // with (see isSameSession below). App.vue keeps one persistent
+      // ExpenseModal instance and only swaps its props, so by the time the
+      // await resolves the user could have closed the sheet, reopened it
+      // for a different transaction, or already picked a fresh date via
+      // DatePicker for whatever comes next — applying this commit's
+      // completion side effects (closing, resetting raw/date, touching the
+      // picker) onto that unrelated later state would be wrong, and the
+      // picker itself may no longer even be mounted (visible could now be
+      // false).
+      const session = this.editingTransaction;
+      const committedDate = this.date;
       try {
         const transactionsStore = useTransactionsStore();
 
-        if (this.editingTransaction) {
-          await transactionsStore.update(this.editingTransaction.id, {
+        if (session) {
+          await transactionsStore.update(session.id, {
             amount,
             date: this.date,
             categoryId: category.id,
           });
           toast.show(`Изменено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-          this.close();
+          if (this.isSameSession(session)) this.close();
         } else {
           await transactionsStore.create({ amount, date: this.date, categoryId: category.id });
           toast.show(`Добавлено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-          this.raw = '';
-          this.date = todayKey();
-          this.$refs.picker.reset();
+          if (this.isSameSession(session)) {
+            this.raw = '';
+            if (this.date === committedDate) this.date = todayKey();
+            this.$refs.picker?.reset();
+          }
         }
       } finally {
         this.submitting = false;
@@ -3378,13 +3533,24 @@ export default {
     async onDelete() {
       if (this.submitting) return;
       this.submitting = true;
+      const session = this.editingTransaction;
       try {
         const transactionsStore = useTransactionsStore();
-        await transactionsStore.remove(this.editingTransaction.id);
-        this.close();
+        await transactionsStore.remove(session.id);
+        if (this.isSameSession(session)) this.close();
       } finally {
         this.submitting = false;
       }
+    },
+    // Compared by id, not by reference: the store's own update() replaces an
+    // item in its array with a new object, so a same-transaction,
+    // different-reference editingTransaction must still count as "the same
+    // session," or a legitimate successful edit would silently fail to
+    // close once App.vue derives this prop reactively from the store.
+    isSameSession(session) {
+      const currentId = this.editingTransaction ? this.editingTransaction.id : null;
+      const sessionId = session ? session.id : null;
+      return currentId === sessionId;
     },
     close() {
       this.$emit('close');
@@ -3488,7 +3654,9 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/ExpenseModal.spec.js`
-Expected: PASS (10 tests).
+Expected: PASS (18 tests).
+
+**Verified in this diligence pass:** a code-quality review of the first implementation, built against the reference code above minus the `submitting` guard on `onKey`, the `isSameSession`/`committedDate` checks, and the operator-replace/rounding/aria-dialog details, empirically reproduced a crash, a silent data-loss bug, and a silent lockout — all from exactly the persistent-instance scenario described at the top of this task — by writing and running throwaway specs against the built component. A second review pass, after those were fixed, found two narrower instances of the same bug class (the `date` field and the edit-mode session check using reference equality instead of id). The reference code above already has every one of those fixes folded in — do not simplify any of them away.
 
 - [ ] **Step 5: Commit**
 

@@ -10,6 +10,8 @@
 
 **Reference:** Full product spec at `docs/superpowers/specs/2026-07-27-budget-app-design.md`. Visual prototype: https://claude.ai/code/artifact/84111cb8-abd6-4ebc-95a8-9d17a5427f02
 
+**Addendum found during Task 3's execution (applies to every task below with a `<style lang="scss">` block):** `@forward` in Sass does not propagate a forwarding file's own `@use`d members downstream, so no component can reach `$font-ui`/`$font-money` through `main.scss`'s forward chain alone. `vite.config.js` now sets `css.preprocessorOptions.scss = { api: 'modern', loadPaths: ['src/styles'] }` (added after Task 3, see commit `dadff84`) — every `<style lang="scss">` block in every component from here on must start with `@use "tokens" as *;` as its first line to get `$font-ui`/`$font-money`. This line is not always shown in the code blocks below (they were written before the gap was found); add it wherever a style block references either variable.
+
 ---
 
 ## Task 1: Project scaffold

@@ -1075,6 +1075,30 @@ describe('useCategoriesStore.childrenOf', () => {
   });
 });
 
+describe('useCategoriesStore.subtreeIds', () => {
+  it('returns a category id plus every descendant id, however deeply nested', async () => {
+    categoriesDb.listCategories.mockResolvedValue([
+      { id: '1', name: 'Еда', emoji: '🍔', parentId: null, archived: false },
+      { id: '2', name: 'Продукты', emoji: '🛒', parentId: '1', archived: false },
+      { id: '3', name: 'Кафе', emoji: '☕', parentId: '1', archived: false },
+      { id: '5', name: 'Латте', emoji: '🥛', parentId: '3', archived: false },
+      { id: '4', name: 'Развлечения', emoji: '🎬', parentId: null, archived: false },
+    ]);
+    const store = useCategoriesStore();
+    await store.load();
+    expect(store.subtreeIds('1')).toEqual(['1', '2', '3', '5']);
+  });
+
+  it('returns just the category itself when it is a leaf', async () => {
+    categoriesDb.listCategories.mockResolvedValue([
+      { id: '4', name: 'Развлечения', emoji: '🎬', parentId: null, archived: false },
+    ]);
+    const store = useCategoriesStore();
+    await store.load();
+    expect(store.subtreeIds('4')).toEqual(['4']);
+  });
+});
+
 describe('useCategoriesStore.archive', () => {
   it('delegates to the db layer and reloads', async () => {
     categoriesDb.listCategories.mockResolvedValue([]);
@@ -1111,6 +1135,24 @@ export const useCategoriesStore = defineStore('categories', {
       return (parentId) => this.active.filter((c) => c.parentId === parentId);
     },
     byId: (state) => (id) => state.items.find((c) => c.id === id),
+    // A category's subtree is itself plus every descendant, found by walking
+    // childrenOf recursively. Pure category-tree shape (no transactions
+    // involved), so it lives next to childrenOf/rootCategories rather than
+    // inside whichever component first needs it — CategoryPie (Task 19)
+    // sums a parent's spend by looking up every leaf under it via this
+    // getter, and any future consumer needing "this category and everything
+    // under it" (e.g. warning on delete, or another aggregate view) can
+    // reuse it too, instead of re-deriving the same walk.
+    subtreeIds() {
+      const walk = (categoryId) => {
+        const ids = [categoryId];
+        for (const child of this.childrenOf(categoryId)) {
+          ids.push(...walk(child.id));
+        }
+        return ids;
+      };
+      return walk;
+    },
   },
   actions: {
     async load() {
@@ -1137,7 +1179,9 @@ export const useCategoriesStore = defineStore('categories', {
 - [ ] **Step 9: Run test to verify it passes**
 
 Run: `npm test -- src/stores/categories.spec.js`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
+
+**Note added during Task 19's review:** `subtreeIds` didn't exist when this task was first written — CategoryPie (Task 19) originally implemented the same recursive walk locally, then it was moved here since it's pure category-tree logic with no dependency on CategoryPie or transactions, the same reasoning as `childrenOf`/`rootCategories` already living on this store. Include it now rather than adding it in Task 19.
 
 - [ ] **Step 10: Commit**
 
@@ -4168,15 +4212,12 @@ export default {
   },
   methods: {
     formatMoney,
-    subtreeIds(rootId) {
-      const ids = [rootId];
-      for (const child of this.categoriesStore.childrenOf(rootId)) {
-        ids.push(...this.subtreeIds(child.id));
-      }
-      return ids;
-    },
+    // subtreeIds lives on useCategoriesStore (Task 7), not here — it's pure
+    // category-tree shape with no dependency on transactions or anything
+    // CategoryPie-specific, so it's reused rather than re-derived, the same
+    // reasoning as this component already reusing childrenOf/rootCategories.
     amountFor(category) {
-      const ids = this.subtreeIds(category.id);
+      const ids = this.categoriesStore.subtreeIds(category.id);
       return this.transactionsStore.items
         .filter((t) => t.date.startsWith(this.monthKey) && ids.includes(t.categoryId))
         .reduce((sum, t) => sum + t.amount, 0);
@@ -4198,6 +4239,12 @@ export default {
   margin-bottom: 8px;
 
   &__back {
+    // Explicit, not just inherited — the shared button reset doesn't zero
+    // padding, and this project has already shipped one real bug (MonthChart)
+    // from a button's UA-default padding silently eating into a percentage-
+    // sized child. Nothing here is percentage-sized against this box today,
+    // so it's not live, but it's free to close off.
+    padding: 0;
     display: inline-flex;
     align-items: center;
     gap: 4px;

@@ -38,4 +38,16 @@ describe('addRate', () => {
     expect(rates).toHaveLength(1);
     expect(rates[0].amount).toBe(3000);
   });
+
+  it('still collapses to one row for the same date under concurrent calls, not just sequential ones', async () => {
+    // A double-tap on Save (e.g. before the button is ever disabled) fires
+    // two addRate calls for the same date before either has finished — this
+    // must not race past the same-date check into two competing inserts.
+    await Promise.all([
+      addRate({ amount: 2500, effectiveFrom: '2026-07-01' }),
+      addRate({ amount: 3000, effectiveFrom: '2026-07-01' }),
+    ]);
+    const rates = await listRates();
+    expect(rates).toHaveLength(1);
+  });
 });

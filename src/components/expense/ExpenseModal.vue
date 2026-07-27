@@ -118,14 +118,18 @@ export default {
       }
       this.submitting = true;
       // Snapshot which session (this specific edit target, or this specific
-      // add session) the write below is for. App.vue keeps one persistent
+      // add session) the write below is for, and the date it was committed
+      // with (see isSameSession below). App.vue keeps one persistent
       // ExpenseModal instance and only swaps its props, so by the time the
-      // await resolves the user could have closed the sheet, or reopened it
-      // for a different transaction entirely — applying this commit's
-      // completion side effects (closing, resetting, touching the picker)
-      // onto that unrelated later session would be wrong, and the picker
-      // itself may no longer even be mounted (visible could now be false).
+      // await resolves the user could have closed the sheet, reopened it
+      // for a different transaction, or already picked a fresh date via
+      // DatePicker for whatever comes next — applying this commit's
+      // completion side effects (closing, resetting raw/date, touching the
+      // picker) onto that unrelated later state would be wrong, and the
+      // picker itself may no longer even be mounted (visible could now be
+      // false).
       const session = this.editingTransaction;
+      const committedDate = this.date;
       try {
         const transactionsStore = useTransactionsStore();
 
@@ -136,13 +140,13 @@ export default {
             categoryId: category.id,
           });
           toast.show(`Изменено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-          if (this.editingTransaction === session) this.close();
+          if (this.isSameSession(session)) this.close();
         } else {
           await transactionsStore.create({ amount, date: this.date, categoryId: category.id });
           toast.show(`Добавлено: ${category.emoji} ${category.name} · ${formatMoney(amount)}`);
-          if (this.editingTransaction === session) {
+          if (this.isSameSession(session)) {
             this.raw = '';
-            this.date = todayKey();
+            if (this.date === committedDate) this.date = todayKey();
             this.$refs.picker?.reset();
           }
         }
@@ -157,10 +161,20 @@ export default {
       try {
         const transactionsStore = useTransactionsStore();
         await transactionsStore.remove(session.id);
-        if (this.editingTransaction === session) this.close();
+        if (this.isSameSession(session)) this.close();
       } finally {
         this.submitting = false;
       }
+    },
+    // Compared by id, not by reference: the store's own update() replaces an
+    // item in its array with a new object, so a same-transaction,
+    // different-reference editingTransaction must still count as "the same
+    // session," or a legitimate successful edit would silently fail to
+    // close once App.vue derives this prop reactively from the store.
+    isSameSession(session) {
+      const currentId = this.editingTransaction ? this.editingTransaction.id : null;
+      const sessionId = session ? session.id : null;
+      return currentId === sessionId;
     },
     close() {
       this.$emit('close');

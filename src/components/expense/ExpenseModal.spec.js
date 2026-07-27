@@ -154,6 +154,22 @@ describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent 
     resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
     await expect(commitPromise).resolves.toBeUndefined();
   });
+
+  it('does not clobber a date the user already picked for the next entry while a stale commit is still resolving', async () => {
+    let resolveCreate;
+    transactionsDb.createTransaction.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    const commitPromise = wrapper.vm.commit({ id: 'fun', name: 'Развлечения', emoji: '🎬' });
+    // DatePicker's own change handler is blocked by nothing during this gap
+    // (only the keypad is guarded) — simulate the user picking "Вчера" for
+    // whatever they type next, before the stale commit resolves.
+    await wrapper.findComponent({ name: 'DatePicker' }).vm.$emit('update:modelValue', '2026-07-26');
+
+    resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
+    await commitPromise;
+    expect(wrapper.vm.date).toBe('2026-07-26');
+  });
 });
 
 describe('ExpenseModal — editing an existing expense', () => {
@@ -181,6 +197,24 @@ describe('ExpenseModal — editing an existing expense', () => {
     await wrapper.find('.category-picker__row').trigger('click');
     await flushPromises();
     expect(transactionsDb.updateTransaction).toHaveBeenCalledWith('t1', expect.objectContaining({ amount: 750 }));
+    expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  it('still closes when the store swaps editingTransaction for a same-id, different-reference object mid-write', async () => {
+    // transactionsStore.update() replaces the item in its own array with a
+    // new object (`this.items[index] = updated`) — if a future App.vue ever
+    // derives editingTransaction reactively from that array, the prop
+    // reference changes even though it's still logically the same edit
+    // session. Comparing by id (not `===`) is what keeps close() firing.
+    let resolveUpdate;
+    transactionsDb.updateTransaction.mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve; }));
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction } });
+    const commitPromise = wrapper.vm.commit({ id: 'fun', name: 'Развлечения', emoji: '🎬' });
+    const sameIdNewReference = { id: 't1', amount: 750, date: '2026-07-10', categoryId: 'fun' };
+    await wrapper.setProps({ editingTransaction: sameIdNewReference });
+
+    resolveUpdate(sameIdNewReference);
+    await commitPromise;
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
 });

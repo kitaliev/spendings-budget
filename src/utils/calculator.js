@@ -1,3 +1,5 @@
+const OPERATORS = ['+', '−', '×', '÷'];
+
 function tokenize(expression) {
   return expression.split(/([+\-−×÷])/).filter((token) => token !== '');
 }
@@ -6,12 +8,39 @@ function toNumber(token) {
   return parseFloat(String(token).replace(',', '.')) || 0;
 }
 
-// Assumes `expression` alternates number/operator/number/... with no leading
-// or consecutive operators — ExpenseModal's onKey handler (the only caller)
-// refuses to append an operator when raw is empty or already ends in one, so
-// this never actually receives a string that breaks that shape.
+// Collapses a token stream into strict number/operator/number/... alternation:
+// a leading operator has nothing to apply to yet and is dropped; consecutive
+// operators keep only the most recent one (the "changed my mind" calculator
+// convention — tapping × right after + replaces the pending + rather than
+// both being applied). Keeps evaluateExpression itself correct on any input
+// shape, independent of what any caller does or doesn't guarantee about raw.
+function normalize(tokens) {
+  const result = [];
+  for (const token of tokens) {
+    if (OPERATORS.includes(token)) {
+      if (result.length === 0) continue;
+      if (OPERATORS.includes(result[result.length - 1])) {
+        result[result.length - 1] = token;
+        continue;
+      }
+    }
+    result.push(token);
+  }
+  return result;
+}
+
+/**
+ * Evaluates a keypad-built arithmetic string (digits, comma decimal
+ * separator, + − × ÷) with standard math precedence (× ÷ before + −,
+ * left-to-right within the same precedence). Never throws: an empty string
+ * evaluates to 0, a trailing operator is ignored, division by zero is a
+ * no-op (returns the left operand), and a malformed operator shape is
+ * normalized rather than misinterpreted (see `normalize`). Does not
+ * constrain the sign of the result — rejecting a non-positive amount is a
+ * business rule for the caller (ExpenseModal), not an arithmetic one.
+ */
 export function evaluateExpression(expression) {
-  const tokens = tokenize(expression);
+  const tokens = normalize(tokenize(expression));
   if (tokens.length === 0) return 0;
 
   // Pass 1: resolve × and ÷ left to right.

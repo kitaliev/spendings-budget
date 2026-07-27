@@ -33,4 +33,17 @@ describe('evaluateExpression', () => {
   it('ignores a trailing operator with nothing typed after it', () => {
     expect(evaluateExpression('120+')).toBe(120);
   });
+
+  it('drops a leading operator rather than misreading token positions', () => {
+    expect(evaluateExpression('−5')).toBe(5);
+  });
+
+  it('keeps only the most recent of consecutive operators', () => {
+    // "changed my mind" — tapping × right after + replaces the pending +.
+    expect(evaluateExpression('120+×2')).toBe(240);
+  });
+
+  it('is a no-op on division by zero rather than producing Infinity/NaN', () => {
+    expect(evaluateExpression('10÷0')).toBe(10);
+  });
 });

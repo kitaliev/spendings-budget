@@ -2984,7 +2984,11 @@ export default {
     onNativeChange(event) {
       const value = event.target.value;
       if (!value) return;
-      this.otherLabel = new Date(value).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      // Build the label from local-time parts, not `new Date(value)` — a bare
+      // YYYY-MM-DD string parses as UTC midnight and can render one day off
+      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
+      const [y, m, d] = value.split('-').map(Number);
+      this.otherLabel = new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
       this.$emit('update:modelValue', value);
     },
   },

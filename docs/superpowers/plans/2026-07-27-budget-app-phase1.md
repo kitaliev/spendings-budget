@@ -2595,6 +2595,12 @@ describe('Keypad', () => {
     expect(keys[3].classes()).toContain('keypad__key--op'); // ÷
     expect(keys[0].classes()).not.toContain('keypad__key--op'); // 7
   });
+
+  it('labels the delete key for assistive tech, since ⌫ alone has no guaranteed spoken reading', () => {
+    const wrapper = mount(Keypad);
+    const keys = wrapper.findAll('.keypad__key');
+    expect(keys[14].attributes('aria-label')).toBe('Стереть');
+  });
 });
 ```
 
@@ -2605,14 +2611,18 @@ Expected: FAIL — module `./Keypad.vue` does not exist.
 
 - [ ] **Step 3: Implement `src/components/expense/Keypad.vue`**
 
+Every button in this codebase gets an explicit `type="button"` (established starting with Task 11's TabBar) — include it here too even though it's easy to forget on a component this simple.
+
 ```vue
 <template>
   <div class="keypad">
     <button
       v-for="key in keys"
       :key="key.value"
+      type="button"
       class="keypad__key"
       :class="{ 'keypad__key--op': key.type === 'op', 'keypad__key--del': key.type === 'del' }"
+      :aria-label="key.ariaLabel || null"
       @click="$emit('key', key.value)"
     >{{ key.label }}</button>
   </div>
@@ -2628,7 +2638,7 @@ export default {
         { value: '7', label: '7' }, { value: '8', label: '8' }, { value: '9', label: '9' }, { value: '÷', label: '÷', type: 'op' },
         { value: '4', label: '4' }, { value: '5', label: '5' }, { value: '6', label: '6' }, { value: '×', label: '×', type: 'op' },
         { value: '1', label: '1' }, { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '−', label: '−', type: 'op' },
-        { value: ',', label: ',' }, { value: '0', label: '0' }, { value: 'del', label: '⌫', type: 'del' }, { value: '+', label: '+', type: 'op' },
+        { value: ',', label: ',' }, { value: '0', label: '0' }, { value: 'del', label: '⌫', type: 'del', ariaLabel: 'Стереть' }, { value: '+', label: '+', type: 'op' },
       ],
     };
   },
@@ -2672,7 +2682,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/Keypad.spec.js`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 

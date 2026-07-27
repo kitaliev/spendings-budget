@@ -27,8 +27,13 @@ export function openDatabase(name = DEFAULT_NAME) {
 
 let dbPromise = null;
 
-/** Shared singleton connection used by the app at runtime (tests use openDatabase() directly with unique names). */
+/** Shared singleton connection used by the app at runtime. */
 export function getDb() {
-  if (!dbPromise) dbPromise = openDatabase();
+  if (!dbPromise) {
+    dbPromise = openDatabase().catch((err) => {
+      dbPromise = null;
+      throw err;
+    });
+  }
   return dbPromise;
 }

@@ -17,4 +17,19 @@ describe('openDatabase', () => {
     expect(Array.from(tx.store.indexNames)).toContain('date');
     db.close();
   });
+
+  it('creates every store with its expected indexes', async () => {
+    const db = await openDatabase('test-db-' + Math.random());
+    const expected = {
+      categories: ['parentId'],
+      transactions: ['date', 'categoryId'],
+      budgetRates: ['effectiveFrom'],
+      debts: ['direction'],
+      debtPayments: ['debtId'],
+    };
+    for (const [store, indexes] of Object.entries(expected)) {
+      expect(Array.from(db.transaction(store).store.indexNames)).toEqual(expect.arrayContaining(indexes));
+    }
+    db.close();
+  });
 });

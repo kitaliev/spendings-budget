@@ -5861,3 +5861,244 @@ git commit -m "feat: add transaction list as the edit entry point"
 ```
 
 ---
+
+## Task 28: Add-debt form (third gap found during execution)
+
+**Files:**
+- Modify: `src/components/debts/DebtsScreen.vue`
+- Modify: `src/components/debts/DebtsScreen.spec.js`
+
+Found the same way as Tasks 26/27: Task 10's code-quality review flagged that a debt created with `amount: 0` would be immediately indistinguishable from a paid-off one, which surfaced the bigger gap behind it — nothing in the plan ever wires up a way to create a debt at all. `DebtsScreen` only ever reads existing `items`; no task calls `debtsStore.create`. A "+" toggle in the top bar reveals an inline form (name, amount, comment), mirroring Task 26's add-category pattern. The debt's `direction` is read from whichever segment is currently active when the form is submitted — no separate direction picker needed, since the segmented control already is that choice. The `amount ≤ 0` guard closes the edge case that surfaced this gap in the first place.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append these `describe` blocks to the existing `src/components/debts/DebtsScreen.spec.js` (and add `vi` to the vitest import, plus a mocked `debtsDb` import — both shown below; the existing tests need no changes and are unaffected since none of them ever reach the DB layer):
+
+```js
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mount } from '@vue/test-utils';
+import { setActivePinia, createPinia } from 'pinia';
+import DebtsScreen from './DebtsScreen.vue';
+import { useDebtsStore } from '../../stores/debts.js';
+import * as debtsDb from '../../db/debts.js';
+
+vi.mock('../../db/debts.js');
+```
+
+(This replaces the existing top-of-file imports — the only change is adding `vi` to the vitest import and the two new lines for `debtsDb` + `vi.mock`. The existing `beforeEach` that seeds `store.items`/`store.payments` directly stays exactly as-is below it.)
+
+```js
+describe('DebtsScreen — adding a debt', () => {
+  it('reveals a form when the add toggle is tapped', async () => {
+    const wrapper = mount(DebtsScreen);
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    expect(wrapper.find('.debts-screen__add-form').exists()).toBe(true);
+  });
+
+  it('creates a debt with the currently active segment as its direction', async () => {
+    debtsDb.createDebt.mockResolvedValue({ id: 'd4', name: 'Олег', amount: 500, comment: '', direction: 'owed_to_me' });
+    const wrapper = mount(DebtsScreen);
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    await wrapper.find('.debts-screen__add-name').setValue('Олег');
+    await wrapper.find('.debts-screen__add-amount').setValue('500');
+    await wrapper.find('.debts-screen__add-form').trigger('submit');
+    expect(debtsDb.createDebt).toHaveBeenCalledWith(expect.objectContaining({ direction: 'owed_to_me' }));
+  });
+
+  it('creates with the other direction after switching segments', async () => {
+    debtsDb.createDebt.mockResolvedValue({ id: 'd5', name: 'Кредит', amount: 1000, comment: '', direction: 'i_owe' });
+    const wrapper = mount(DebtsScreen);
+    await wrapper.findAll('.segmented__opt')[1].trigger('click'); // switch to "Я должен"
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    await wrapper.find('.debts-screen__add-name').setValue('Кредит');
+    await wrapper.find('.debts-screen__add-amount').setValue('1000');
+    await wrapper.find('.debts-screen__add-form').trigger('submit');
+    expect(debtsDb.createDebt).toHaveBeenCalledWith(expect.objectContaining({ direction: 'i_owe' }));
+  });
+
+  it('does not submit without a name or a positive amount', async () => {
+    const wrapper = mount(DebtsScreen);
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    await wrapper.find('.debts-screen__add-form').trigger('submit');
+    expect(debtsDb.createDebt).not.toHaveBeenCalled();
+  });
+
+  it('rejects an amount of zero, the exact edge case that surfaced this gap', async () => {
+    const wrapper = mount(DebtsScreen);
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    await wrapper.find('.debts-screen__add-name').setValue('Тест');
+    await wrapper.find('.debts-screen__add-amount').setValue('0');
+    await wrapper.find('.debts-screen__add-form').trigger('submit');
+    expect(debtsDb.createDebt).not.toHaveBeenCalled();
+  });
+
+  it('closes the form after a successful submission', async () => {
+    debtsDb.createDebt.mockResolvedValue({ id: 'd6', name: 'X', amount: 100, comment: '', direction: 'owed_to_me' });
+    const wrapper = mount(DebtsScreen);
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    await wrapper.find('.debts-screen__add-name').setValue('X');
+    await wrapper.find('.debts-screen__add-amount').setValue('100');
+    await wrapper.find('.debts-screen__add-form').trigger('submit');
+    expect(wrapper.find('.debts-screen__add-form').exists()).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `npm test -- src/components/debts/DebtsScreen.spec.js`
+Expected: FAIL — `.debts-screen__add-toggle` does not exist yet.
+
+- [ ] **Step 3: Update `src/components/debts/DebtsScreen.vue`**
+
+Replace the `<template>` block with:
+
+```vue
+<template>
+  <div class="debts-screen">
+    <TopBar title="Долги">
+      <template #right>
+        <button class="debts-screen__add-toggle" aria-label="Добавить долг" @click="addingOpen = !addingOpen">
+          {{ addingOpen ? '✕' : '+' }}
+        </button>
+      </template>
+    </TopBar>
+
+    <form v-if="addingOpen" class="debts-screen__add-form" @submit.prevent="submitAdd">
+      <input v-model="newName" class="debts-screen__add-name" placeholder="Название" />
+      <input v-model="newAmount" type="number" inputmode="decimal" class="debts-screen__add-amount" placeholder="Сумма" />
+      <input v-model="newComment" class="debts-screen__add-comment" placeholder="Комментарий (необязательно)" />
+      <button type="submit" class="debts-screen__add-submit">Добавить</button>
+    </form>
+
+    <div class="segmented">
+      <button
+        v-for="option in segments"
+        :key="option.value"
+        class="segmented__opt"
+        :class="{ 'segmented__opt--active': option.value === direction }"
+        @click="direction = option.value"
+      >{{ option.label }}</button>
+    </div>
+
+    <DebtCard v-for="debt in openDebts" :key="debt.id" :debt="debt" />
+
+    <button class="closed-toggle" @click="closedOpen = !closedOpen">
+      <span>{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
+    </button>
+    <div v-if="closedOpen" class="closed-list">
+      <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
+        <span class="closed-card__name">{{ debt.name }}</span>
+        <span>{{ formatMoney(debt.amount) }}</span>
+      </div>
+    </div>
+  </div>
+</template>
+```
+
+Add to `data()` (merge with the existing returned object):
+
+```js
+data() {
+  return {
+    direction: 'owed_to_me',
+    closedOpen: false,
+    addingOpen: false,
+    newName: '',
+    newAmount: '',
+    newComment: '',
+    segments: [
+      { value: 'owed_to_me', label: 'Мне должны' },
+      { value: 'i_owe', label: 'Я должен' },
+    ],
+  };
+},
+```
+
+Add to `methods` (merge with the existing `formatMoney`):
+
+```js
+async submitAdd() {
+  const amount = parseFloat(this.newAmount);
+  if (!this.newName.trim() || !amount || amount <= 0) return;
+  await this.debtsStore.create({
+    name: this.newName.trim(),
+    amount,
+    comment: this.newComment.trim(),
+    direction: this.direction,
+  });
+  this.newName = '';
+  this.newAmount = '';
+  this.newComment = '';
+  this.addingOpen = false;
+},
+```
+
+Add to the `<style lang="scss">` block:
+
+```scss
+.debts-screen {
+  &__add-toggle {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 16px;
+  }
+
+  &__add-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  &__add-name {
+    flex: 2;
+    min-width: 120px;
+  }
+
+  &__add-amount {
+    flex: 1;
+    min-width: 80px;
+  }
+
+  &__add-comment {
+    flex: 1 1 100%;
+  }
+
+  &__add-name,
+  &__add-amount,
+  &__add-comment {
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+  }
+
+  &__add-submit {
+    flex: 1 1 100%;
+    padding: 10px;
+    border-radius: 11px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 650;
+    font-size: 13.5px;
+  }
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npm test -- src/components/debts/DebtsScreen.spec.js`
+Expected: PASS (10 tests total — 4 from Task 22 plus 6 new).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/debts/DebtsScreen.vue src/components/debts/DebtsScreen.spec.js
+git commit -m "feat: add debt creation form"
+```
+
+---

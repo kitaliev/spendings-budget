@@ -7,7 +7,7 @@
       aria-label="Предыдущий месяц"
       @click="$emit('prev')"
     >‹</button>
-    <span class="month-nav__label">{{ label }}</span>
+    <span class="month-nav__label" aria-live="polite" aria-atomic="true">{{ label }}</span>
     <button
       type="button"
       class="month-nav__arrow month-nav__arrow--next"
@@ -56,21 +56,34 @@ export default {
     color: var(--ink-muted);
 
     // Visual circle stays 28px per design, but the tappable area is widened
-    // to the 44px accessible touch-target minimum via an invisible hit area
-    // on a pseudo-element, rather than growing the circle itself.
+    // toward the 44px accessible touch-target minimum via an invisible hit
+    // area on a pseudo-element, rather than growing the circle itself.
+    // Asymmetric on purpose: the side facing the label only extends 1px (just
+    // enough to close the 2px flex gap) instead of the full 8px — a
+    // symmetric inset here would reach past the label's own edge (`gap: 2px`
+    // is smaller than an 8px inset) and let a tap that looks like it's
+    // hitting the label text silently change the month instead.
     &::before {
       content: '';
       position: absolute;
       top: -8px;
-      right: -8px;
       bottom: -8px;
-      left: -8px;
     }
 
     &:disabled {
       opacity: 0.25;
       pointer-events: none;
     }
+  }
+
+  &__arrow--prev::before {
+    left: -8px;
+    right: -1px;
+  }
+
+  &__arrow--next::before {
+    left: -1px;
+    right: -8px;
   }
 
   &__label {

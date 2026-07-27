@@ -17,4 +17,8 @@ describe('formatMoney', () => {
   it('handles zero', () => {
     expect(formatMoney(0)).toBe('0 ₽');
   });
+
+  it('does not render "−0 ₽" for a negative amount that rounds to zero', () => {
+    expect(formatMoney(-0.4)).toBe('0 ₽');
+  });
 });

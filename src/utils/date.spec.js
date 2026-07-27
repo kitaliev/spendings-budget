@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { toDateKey, toMonthKey, daysInMonth, daysElapsedInMonth } from './date.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { toDateKey, toMonthKey, todayKey, yesterdayKey, daysInMonth, daysElapsedInMonth } from './date.js';
 
 describe('toDateKey', () => {
   it('formats a Date as YYYY-MM-DD', () => {
@@ -8,6 +8,34 @@ describe('toDateKey', () => {
 
   it('pads single-digit month and day', () => {
     expect(toDateKey(new Date(2026, 0, 5))).toBe('2026-01-05');
+  });
+
+  it('passes an already-formatted date-key string through unchanged, without a UTC round-trip', () => {
+    expect(toDateKey('2026-07-26')).toBe('2026-07-26');
+  });
+});
+
+describe('todayKey / yesterdayKey', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 27));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('todayKey reflects the current system date', () => {
+    expect(todayKey()).toBe('2026-07-27');
+  });
+
+  it('yesterdayKey is one calendar day behind', () => {
+    expect(yesterdayKey()).toBe('2026-07-26');
+  });
+
+  it('yesterdayKey crosses a month boundary correctly', () => {
+    vi.setSystemTime(new Date(2026, 7, 1)); // 1 Aug 2026
+    expect(yesterdayKey()).toBe('2026-07-31');
   });
 });
 
@@ -38,5 +66,13 @@ describe('daysElapsedInMonth', () => {
 
   it('returns 0 for a future month', () => {
     expect(daysElapsedInMonth('2026-12', '2026-07-26')).toBe(0);
+  });
+
+  it('returns 1 on the first day of the current month', () => {
+    expect(daysElapsedInMonth('2026-07', '2026-07-01')).toBe(1);
+  });
+
+  it('returns the full month length on the last day of the current month', () => {
+    expect(daysElapsedInMonth('2026-07', '2026-07-31')).toBe(31);
   });
 });

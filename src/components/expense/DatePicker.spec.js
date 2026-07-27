@@ -27,6 +27,14 @@ describe('DatePicker', () => {
     expect(wrapper.findAll('.date-row__btn')[2].classes()).toContain('date-row__btn--active');
   });
 
+  it('shows the formatted date on the native button when mounted directly with an "other" date, before any change event fires', () => {
+    // Covers the edit-existing-transaction case (Task 17): the label must be
+    // correct on first render, not only after the user interacts with the
+    // native input themselves.
+    const wrapper = mount(DatePicker, { props: { modelValue: '2026-07-01' } });
+    expect(wrapper.findAll('.date-row__btn')[2].text()).toBe('1 июл.');
+  });
+
   it('emits update:modelValue with today when "Сегодня" is clicked', async () => {
     const wrapper = mount(DatePicker, { props: { modelValue: '2026-07-01' } });
     await wrapper.findAll('.date-row__btn')[0].trigger('click');

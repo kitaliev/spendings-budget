@@ -37,16 +37,23 @@ export default {
     },
   },
   emits: ['update:modelValue'],
-  data() {
-    return {
-      otherLabel: 'Другая дата',
-    };
-  },
   computed: {
     mode() {
       if (this.modelValue === todayKey()) return 'today';
       if (this.modelValue === yesterdayKey()) return 'yesterday';
       return 'other';
+    },
+    otherLabel() {
+      // Derived from modelValue, not tracked as separate mutable state — it
+      // must render correctly the instant this component mounts with an
+      // existing "other" date (e.g. Task 17 editing a past transaction), not
+      // only after the native input's own change handler has fired once.
+      if (this.mode !== 'other') return 'Другая дата';
+      // Build the label from local-time parts, not `new Date(value)` — a bare
+      // YYYY-MM-DD string parses as UTC midnight and can render one day off
+      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
+      const [y, m, d] = this.modelValue.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
     },
   },
   methods: {
@@ -55,11 +62,6 @@ export default {
     onNativeChange(event) {
       const value = event.target.value;
       if (!value) return;
-      // Build the label from local-time parts, not `new Date(value)` — a bare
-      // YYYY-MM-DD string parses as UTC midnight and can render one day off
-      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
-      const [y, m, d] = value.split('-').map(Number);
-      this.otherLabel = new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
       this.$emit('update:modelValue', value);
     },
   },

@@ -10,7 +10,7 @@
 
 **Reference:** Full product spec at `docs/superpowers/specs/2026-07-27-budget-app-design.md`. Visual prototype: https://claude.ai/code/artifact/84111cb8-abd6-4ebc-95a8-9d17a5427f02
 
-**Addendum found during Task 3's execution (applies to every task below with a `<style lang="scss">` block):** `@forward` in Sass does not propagate a forwarding file's own `@use`d members downstream, so no component can reach `$font-ui`/`$font-money` through `main.scss`'s forward chain alone. `vite.config.js` now sets `css.preprocessorOptions.scss = { api: 'modern', loadPaths: ['src/styles'] }` (added after Task 3, see commit `dadff84`) — every `<style lang="scss">` block in every component from here on must start with `@use "tokens" as *;` as its first line to get `$font-ui`/`$font-money`. This line is not always shown in the code blocks below (they were written before the gap was found); add it wherever a style block references either variable.
+**Addendum, resolved during Task 3's execution:** the font tokens were originally written as Sass variables (`$font-ui`/`$font-money`), which turned out to be the wrong call — Sass's `@forward` doesn't propagate a forwarding file's own `@use`d members downstream, so every one of the ~14 future `<style lang="scss">` blocks referencing them would have needed its own `@use "tokens" as *;` line (easy to forget, fails the build when missed). Fixed at the root instead: `--font-ui`/`--font-money` are now plain CSS custom properties in `_tokens.scss`, exactly like every other token, consumed via `var(--font-ui)`/`var(--font-money)` from any `<style>` block with no Sass import needed at all — the code blocks throughout this document already reflect that (see commit `2475256`). `vite.config.js` still sets `css.preprocessorOptions.scss = { api: 'modern', loadPaths: ['src/styles'] }` (commit `dadff84`) as a harmless safety net in case a genuine Sass-only construct (a mixin, a map) ever gets added to `src/styles/` — it just isn't load-bearing for typography anymore.
 
 ---
 
@@ -239,6 +239,8 @@ Values carried over from the approved prototype (both themes; token-level, not a
 ```scss
 :root {
   color-scheme: light;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --font-money: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --ground: #F3F5F4;
   --surface: #FFFFFF;
   --surface-raised: #E8EBEA;
@@ -257,6 +259,9 @@ Values carried over from the approved prototype (both themes; token-level, not a
   --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a;
   --cat-4: #eda100; --cat-5: #e87ba4; --cat-6: #4a3aa7;
 }
+
+/* font-ui/font-money are theme-invariant — declared once above, inherited by
+   the [data-theme] override blocks below without redeclaration. */
 
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -281,6 +286,9 @@ Values carried over from the approved prototype (both themes; token-level, not a
   }
 }
 
+// Phase 1 never sets data-theme itself (no in-app theme toggle yet) — these two
+// blocks exist as forward-compat scaffolding for one, and are unreachable until
+// something sets the attribute.
 :root[data-theme="dark"] {
   color-scheme: dark;
   --ground: #10161A;
@@ -322,9 +330,6 @@ Values carried over from the approved prototype (both themes; token-level, not a
   --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a;
   --cat-4: #eda100; --cat-5: #e87ba4; --cat-6: #4a3aa7;
 }
-
-$font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-$font-money: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 ```
 
 - [ ] **Step 2: Create `src/styles/_reset.scss`**
@@ -338,10 +343,12 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font-family: $font-ui;
+  font-family: var(--font-ui);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }
+/* No `@use 'tokens'` needed here — --font-ui is a CSS custom property now,
+   readable via var() with zero Sass wiring, same as every other token. */
 
 button {
   font: inherit;
@@ -368,7 +375,6 @@ button:focus-visible {
 
 ```scss
 @forward 'tokens';
-@use 'tokens' as *;
 @forward 'reset';
 ```
 
@@ -2613,17 +2619,17 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: $font-money;
+    font-family: var(--font-money);
 
     &--op {
       background: transparent;
       color: var(--accent-strong);
-      font-family: $font-ui;
+      font-family: var(--font-ui);
     }
 
     &--del {
       color: var(--negative);
-      font-family: $font-ui;
+      font-family: var(--font-ui);
       font-size: 16px;
     }
   }
@@ -3335,7 +3341,7 @@ export default {
   }
 
   &__entry-value {
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 40px;
     font-weight: 600;
     letter-spacing: -0.01em;
@@ -3835,7 +3841,7 @@ export default {
   }
 
   &__amount {
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 13px;
     color: var(--ink-secondary);
     width: 74px;
@@ -4101,7 +4107,7 @@ export default {
   }
 
   &__hero-value {
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 42px;
     font-weight: 600;
     letter-spacing: -0.01em;
@@ -4320,7 +4326,7 @@ export default {
   }
 
   &__amount {
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 17px;
     font-weight: 600;
     white-space: nowrap;
@@ -4359,7 +4365,7 @@ export default {
     font-size: 12.5px;
     padding: 5px 0;
     color: var(--ink-secondary);
-    font-family: $font-money;
+    font-family: var(--font-money);
   }
 
   &__pay-form {
@@ -4373,7 +4379,7 @@ export default {
     background: var(--surface-sunken);
     border-radius: 10px;
     padding: 10px;
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 14px;
   }
 
@@ -5024,7 +5030,7 @@ export default {
     align-items: center;
     gap: 6px;
     font-size: 14px;
-    font-family: $font-money;
+    font-family: var(--font-money);
     color: var(--ink-muted);
   }
 
@@ -5038,7 +5044,7 @@ export default {
     background: var(--surface-sunken);
     border-radius: 8px;
     padding: 6px 8px;
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 14px;
   }
 
@@ -5680,7 +5686,7 @@ export default {
   }
 
   &__date {
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 12px;
     color: var(--ink-muted);
     width: 20px;
@@ -5696,7 +5702,7 @@ export default {
   }
 
   &__amount {
-    font-family: $font-money;
+    font-family: var(--font-money);
     font-size: 13px;
     color: var(--ink-secondary);
   }

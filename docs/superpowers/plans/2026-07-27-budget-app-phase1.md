@@ -4424,7 +4424,7 @@ Expected: FAIL — module `./BudgetDashboard.vue` does not exist.
         <MonthNav :label="monthLabel" :can-go-next="canGoNext" @prev="prevMonth" @next="nextMonth" />
       </template>
       <template #right>
-        <button class="budget-dashboard__settings" aria-label="Настройки" @click="$emit('open-settings')">⚙️</button>
+        <button type="button" class="budget-dashboard__settings" aria-label="Настройки" @click="$emit('open-settings')">⚙️</button>
       </template>
     </TopBar>
 

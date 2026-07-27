@@ -37,3 +37,12 @@ export function getDb() {
   }
   return dbPromise;
 }
+
+/** Test-only: empties every store so specs don't leak state into each other via the shared singleton connection. */
+export async function clearAllStores() {
+  const db = await getDb();
+  const storeNames = Array.from(db.objectStoreNames);
+  const tx = db.transaction(storeNames, 'readwrite');
+  await Promise.all(storeNames.map((name) => tx.objectStore(name).clear()));
+  await tx.done;
+}

@@ -608,7 +608,7 @@ Expected: PASS (4 tests).
 ```js
 // src/utils/date.spec.js
 import { describe, it, expect } from 'vitest';
-import { toDateKey, toMonthKey, daysInMonth, daysElapsedInMonth, monthNameWithYear } from './date.js';
+import { toDateKey, toMonthKey, daysInMonth, daysElapsedInMonth, monthNameWithYear, shortDate } from './date.js';
 
 describe('toDateKey', () => {
   it('formats a Date as YYYY-MM-DD', () => {
@@ -659,6 +659,16 @@ describe('monthNameWithYear', () => {
     expect(monthNameWithYear('2026-03')).toBe('Март 2026');
     expect(monthNameWithYear('2026-08')).toBe('Август 2026');
     expect(monthNameWithYear('2026-12')).toBe('Декабрь 2026');
+  });
+});
+
+describe('shortDate', () => {
+  it('formats a date key as day + abbreviated month', () => {
+    expect(shortDate('2026-07-27')).toBe('27 июл.');
+  });
+
+  it('does not shift the day for a date key (local-time parts, not new Date(string))', () => {
+    expect(shortDate('2026-01-01')).toBe('1 янв.');
   });
 });
 ```
@@ -717,12 +727,24 @@ export function monthNameWithYear(monthKey) {
   const name = new Date(year, month - 1, 1).toLocaleDateString('ru-RU', { month: 'long' });
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${year}`;
 }
+
+// "27 июл." — a compact day+month display, shared by DatePicker's "other
+// date" label and any place needing to show a stored date key (e.g. a debt
+// payment's date) as something more readable than a raw YYYY-MM-DD string.
+// Built from local-time parts, not `new Date(dateKey)` — same UTC-parsing
+// hazard as toDateKey.
+export function shortDate(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
 ```
 
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/utils/date.spec.js`
-Expected: PASS (11 tests).
+Expected: PASS (13 tests).
+
+**Note added during Task 21's review:** `shortDate` didn't exist when this task was first written — it was extracted here after Task 16 (`DatePicker`) and Task 21 (`DebtCard`) turned out to need the exact same day+month formatter independently. Include it now rather than adding it piecemeal later.
 
 - [ ] **Step 9: Commit**
 
@@ -3074,7 +3096,7 @@ Expected: FAIL — module `./DatePicker.vue` does not exist.
 </template>
 
 <script>
-import { todayKey, yesterdayKey } from '../../utils/date.js';
+import { todayKey, yesterdayKey, shortDate } from '../../utils/date.js';
 
 export default {
   name: 'DatePicker',
@@ -3097,11 +3119,7 @@ export default {
       // existing "other" date (e.g. Task 17 editing a past transaction), not
       // only after the native input's own change handler has fired once.
       if (this.mode !== 'other') return 'Другая дата';
-      // Build the label from local-time parts, not `new Date(value)` — a bare
-      // YYYY-MM-DD string parses as UTC midnight and can render one day off
-      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
-      const [y, m, d] = this.modelValue.split('-').map(Number);
-      return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      return shortDate(this.modelValue);
     },
   },
   methods: {
@@ -4694,7 +4712,11 @@ beforeEach(() => {
   setActivePinia(createPinia());
   const store = useDebtsStore();
   store.items = [debt];
-  store.payments = [{ id: 'p1', debtId: 'd1', amount: 5000, date: '02.07.2026' }];
+  // A real YYYY-MM-DD key, matching every actual production producer
+  // (todayKey(), the db layer) — not a DD.MM.YYYY-with-dots shape, which
+  // would happen to look pre-formatted and mask the component rendering
+  // the raw key unformatted.
+  store.payments = [{ id: 'p1', debtId: 'd1', amount: 5000, date: '2026-07-02' }];
 });
 
 describe('DebtCard', () => {
@@ -4714,17 +4736,42 @@ describe('DebtCard', () => {
     expect(wrapper.find('.debt-card__detail').exists()).toBe(false);
   });
 
-  it('shows payment history after tapping the card', async () => {
+  it('shows payment history after tapping the card, with the date formatted for reading rather than a raw key', async () => {
     const wrapper = mount(DebtCard, { props: { debt } });
     await wrapper.find('.debt-card__top').trigger('click');
-    expect(wrapper.find('.debt-card__hist-row').text()).toContain('02.07.2026');
+    expect(wrapper.find('.debt-card__hist-row').text()).toContain('2 июл.');
+  });
+
+  it('closes the history again on a second tap', async () => {
+    const wrapper = mount(DebtCard, { props: { debt } });
+    await wrapper.find('.debt-card__top').trigger('click');
+    await wrapper.find('.debt-card__top').trigger('click');
+    expect(wrapper.find('.debt-card__detail').exists()).toBe(false);
+  });
+
+  it('clamps the paid percentage at 100 for an overpaid debt, instead of reading e.g. 120%', () => {
+    const store = useDebtsStore();
+    store.payments = [{ id: 'p1', debtId: 'd1', amount: 18000, date: '2026-07-02' }];
+    const wrapper = mount(DebtCard, { props: { debt } });
+    // Without clamping this would read 120% (18000/15000): (15000-(-3000))/15000*100.
+    expect(wrapper.find('.debt-card__meta').text()).toContain('100%');
   });
 
   it('records a new payment through the pay form and updates the remaining balance', async () => {
     const wrapper = mount(DebtCard, { props: { debt } });
     await wrapper.find('.debt-card__top').trigger('click');
     await wrapper.find('.debt-card__pay-input').setValue('2000');
-    await wrapper.find('.debt-card__pay-form').trigger('submit');
+    // Awaits submitPayment()'s own returned promise directly, rather than
+    // DOM-triggering the submit event + flushPromises(): this is the one
+    // test in this file that crosses a real, un-mocked IndexedDB round trip
+    // (submitPayment -> debtsStore.pay -> debtsDb.addPayment), which settles
+    // over several macrotask ticks — more on a cold db connection, since
+    // getDb()'s module-level singleton is still unopened at this point in
+    // the file — rather than the single tick flushPromises() drains, so
+    // counting flushes here would be brittle. The @submit.prevent ->
+    // submitPayment wiring itself is already covered by the trigger('submit')
+    // tests elsewhere in this file.
+    await wrapper.vm.submitPayment();
     expect(wrapper.find('.debt-card__amount').text()).toBe('8 000 ₽');
   });
 
@@ -4773,7 +4820,10 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
       <span class="debt-card__amount">{{ formatMoney(remaining) }}</span>
     </button>
 
-    <div class="debt-card__meter">
+    <!-- Purely decorative reinforcement of the percentage/total already
+         spelled out as text right below — same treatment as CategoryPie's
+         chart circle. -->
+    <div class="debt-card__meter" aria-hidden="true">
       <div class="debt-card__meter-fill" :style="{ width: paidPct + '%' }"></div>
     </div>
     <div class="debt-card__meta">
@@ -4786,7 +4836,7 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
         <span>Платежей ещё нет</span>
       </div>
       <div v-for="payment in payments" :key="payment.id" class="debt-card__hist-row">
-        <span>{{ payment.date }}</span>
+        <span>{{ shortDate(payment.date) }}</span>
         <span>{{ formatMoney(payment.amount) }}</span>
       </div>
       <form class="debt-card__pay-form" @submit.prevent="submitPayment">
@@ -4801,7 +4851,7 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
 import { useDebtsStore } from '../../stores/debts.js';
 import { useToastStore } from '../../stores/toast.js';
 import { formatMoney } from '../../utils/currency.js';
-import { todayKey } from '../../utils/date.js';
+import { todayKey, shortDate } from '../../utils/date.js';
 
 export default {
   name: 'DebtCard',
@@ -4835,11 +4885,16 @@ export default {
     },
     paidPct() {
       if (this.debt.amount === 0) return 0;
-      return Math.round(((this.debt.amount - this.remaining) / this.debt.amount) * 100);
+      // Clamped at 100 — overpaying a debt (remaining goes negative) is
+      // possible and already handled correctly by the headline figure
+      // itself, but "Выплачено 120%" reads as a bug rather than a real
+      // state, and the meter bar has no reason to run past its own track.
+      return Math.min(100, Math.round(((this.debt.amount - this.remaining) / this.debt.amount) * 100));
     },
   },
   methods: {
     formatMoney,
+    shortDate,
     async submitPayment() {
       if (this.submitting) return;
       // A native number input still allows a leading "-" regardless of
@@ -4874,12 +4929,29 @@ export default {
   margin-bottom: 12px;
 
   &__top {
+    position: relative;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     width: 100%;
     text-align: left;
     gap: 10px;
+
+    // This row's own height is emergent (one line with no comment measures
+    // ~24px, well under the 44px accessible touch-target minimum — verified
+    // in a real browser) — widened via an invisible hit area rather than
+    // forcing extra visual height that would look like empty padding on a
+    // short card. -10px vertically is enough to clear 44px even for the
+    // shortest (no-comment) case; horizontal expansion isn't needed since
+    // the button already spans the card's full width.
+    &::before {
+      content: '';
+      position: absolute;
+      top: -10px;
+      bottom: -10px;
+      left: 0;
+      right: 0;
+    }
   }
 
   &__name {
@@ -4951,6 +5023,17 @@ export default {
     padding: 10px;
     font-family: var(--font-money);
     font-size: 14px;
+    // Hide the native up/down stepper — every other numeric-ish input in
+    // this app is either fully custom (Keypad) or visually hidden
+    // (DatePicker's native date input), so a bare spinner here would be the
+    // one unstyled system control left in the whole UI.
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
   }
 
   &__pay-btn {
@@ -4968,7 +5051,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/debts/DebtCard.spec.js`
-Expected: PASS (7 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 5: Commit**
 

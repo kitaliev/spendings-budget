@@ -62,6 +62,12 @@ export default defineConfig(({ command }) => ({
     // from this directory would also collect and run every spec file inside
     // any worktree, duplicating (and potentially destabilizing, since two
     // copies of the same spec file run in the same process) the real run.
-    exclude: [...configDefaults.exclude, '**/.worktrees/**'],
+    //
+    // server/ is its own separate Node package (own package.json, run via
+    // `node --test`, not vitest) — server/*.test.js files use node:test
+    // syntax, which vitest can't execute, so without this exclude it reports
+    // them as a false "no test suite found" failure alongside the real
+    // (passing) client-side run.
+    exclude: [...configDefaults.exclude, '**/.worktrees/**', '**/server/**'],
   },
 }));

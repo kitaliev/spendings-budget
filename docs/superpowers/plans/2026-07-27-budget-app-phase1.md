@@ -4682,8 +4682,8 @@ Per spec §12: the headline figure is the **remaining** balance (derived), not t
 
 ```js
 // src/components/debts/DebtCard.spec.js
-import { describe, it, expect, beforeEach } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mount, flushPromises } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import DebtCard from './DebtCard.vue';
 import { useDebtsStore } from '../../stores/debts.js';
@@ -4727,6 +4727,31 @@ describe('DebtCard', () => {
     await wrapper.find('.debt-card__pay-form').trigger('submit');
     expect(wrapper.find('.debt-card__amount').text()).toBe('8 000 ₽');
   });
+
+  it('rejects a non-positive payment amount without touching the store', async () => {
+    const wrapper = mount(DebtCard, { props: { debt } });
+    await wrapper.find('.debt-card__top').trigger('click');
+    await wrapper.find('.debt-card__pay-input').setValue('-500');
+    await wrapper.find('.debt-card__pay-form').trigger('submit');
+    // Remaining stays at the original 10 000 — a negative "payment" must
+    // never be allowed to increase it.
+    expect(wrapper.find('.debt-card__amount').text()).toBe('10 000 ₽');
+  });
+
+  it('ignores a second submit while the first payment is still in flight', async () => {
+    const store = useDebtsStore();
+    let resolvePay;
+    vi.spyOn(store, 'pay').mockImplementation(() => new Promise((resolve) => { resolvePay = resolve; }));
+    const wrapper = mount(DebtCard, { props: { debt } });
+    await wrapper.find('.debt-card__top').trigger('click');
+    await wrapper.find('.debt-card__pay-input').setValue('2000');
+    const form = wrapper.find('.debt-card__pay-form');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolvePay({ id: 'p2', debtId: 'd1', amount: 2000, date: '2026-07-28' });
+    await flushPromises();
+    expect(store.pay).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
@@ -4740,7 +4765,7 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
 ```vue
 <template>
   <div class="debt-card">
-    <button class="debt-card__top" @click="open = !open">
+    <button type="button" class="debt-card__top" @click="open = !open">
       <span class="debt-card__title">
         <span class="debt-card__name">{{ debt.name }}</span>
         <span v-if="debt.comment" class="debt-card__comment">{{ debt.comment }}</span>
@@ -4765,7 +4790,7 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
         <span>{{ formatMoney(payment.amount) }}</span>
       </div>
       <form class="debt-card__pay-form" @submit.prevent="submitPayment">
-        <input v-model="payAmount" type="number" inputmode="decimal" placeholder="Сумма" class="debt-card__pay-input" />
+        <input v-model="payAmount" type="number" inputmode="decimal" min="1" step="1" placeholder="Сумма" class="debt-card__pay-input" />
         <button type="submit" class="debt-card__pay-btn">Оплатить</button>
       </form>
     </div>
@@ -4774,6 +4799,7 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
 
 <script>
 import { useDebtsStore } from '../../stores/debts.js';
+import { useToastStore } from '../../stores/toast.js';
 import { formatMoney } from '../../utils/currency.js';
 import { todayKey } from '../../utils/date.js';
 
@@ -4789,6 +4815,12 @@ export default {
     return {
       open: false,
       payAmount: '',
+      // Neither the db layer (db/debts.js's addPayment) nor the store (pay())
+      // validates the amount at all — this component is the only place that
+      // can. Also guards against a fast double-submit creating the same
+      // payment twice during the await gap, same shape as ExpenseModal's
+      // commit() guard.
+      submitting: false,
     };
   },
   computed: {
@@ -4809,10 +4841,25 @@ export default {
   methods: {
     formatMoney,
     async submitPayment() {
-      const amount = parseFloat(this.payAmount);
-      if (!amount) return;
-      await this.debtsStore.pay(this.debt.id, amount, todayKey());
-      this.payAmount = '';
+      if (this.submitting) return;
+      // A native number input still allows a leading "-" regardless of
+      // inputmode/min/step (those are soft UI hints, not enforcement —
+      // @submit.prevent also skips native constraint-validation blocking).
+      // !(amount > 0) rejects NaN (empty/invalid text), zero, and negative
+      // values uniformly — a plain `amount <= 0` check would let NaN
+      // through, since every comparison against NaN is false.
+      const amount = Math.round(parseFloat(this.payAmount));
+      if (!(amount > 0)) {
+        useToastStore().show('Сумма должна быть больше нуля');
+        return;
+      }
+      this.submitting = true;
+      try {
+        await this.debtsStore.pay(this.debt.id, amount, todayKey());
+        this.payAmount = '';
+      } finally {
+        this.submitting = false;
+      }
     },
   },
 };
@@ -4921,7 +4968,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/debts/DebtCard.spec.js`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 

@@ -4307,6 +4307,18 @@ export default {
 .category-pie {
   margin-bottom: 8px;
 
+  // Rendered as a bare <p> with no rule of its own until now — it fell
+  // back to the UA default ~1em top/bottom margin and regular body-text
+  // weight/color, out of step with every other section label in this app.
+  // (Found and fixed while prepping Task 24's SettingsScreen, which needed
+  // the same kind of section label.)
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin: 0 0 10px;
+  }
+
   &__back {
     // Explicit, not just inherited — the shared button reset doesn't zero
     // padding, and this project has already shipped one real bug (MonthChart)
@@ -5776,7 +5788,7 @@ Expected: FAIL — module `./SettingsScreen.vue` does not exist.
     <TopBar title="Настройки" />
 
     <div class="settings-group">
-      <p class="section-title">Бюджет</p>
+      <p class="settings-group__title">Бюджет</p>
       <div class="settings-list">
         <div class="settings-row">
           <span class="settings-row__label">Дневной бюджет</span>
@@ -5784,7 +5796,7 @@ Expected: FAIL — module `./SettingsScreen.vue` does not exist.
             <input v-model="rateInput" type="number" inputmode="decimal" class="settings-row__rate-input" />
             <button type="submit" class="settings-row__rate-save">Сохранить</button>
           </form>
-          <button v-else class="settings-row__value" @click="startEditingRate">
+          <button v-else type="button" class="settings-row__value" @click="startEditingRate">
             {{ formatMoney(budgetRatesStore.currentRate) }} <span>›</span>
           </button>
         </div>
@@ -5792,7 +5804,7 @@ Expected: FAIL — module `./SettingsScreen.vue` does not exist.
     </div>
 
     <div class="settings-group">
-      <p class="section-title">Категории</p>
+      <p class="settings-group__title">Категории</p>
       <CategoryTree />
     </div>
   </div>
@@ -5802,7 +5814,8 @@ Expected: FAIL — module `./SettingsScreen.vue` does not exist.
 import TopBar from '../layout/TopBar.vue';
 import CategoryTree from './CategoryTree.vue';
 import { useBudgetRatesStore } from '../../stores/budgetRates.js';
-import { formatMoney } from '../../utils/currency.js';
+import { useToastStore } from '../../stores/toast.js';
+import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 
 export default {
   name: 'SettingsScreen',
@@ -5811,6 +5824,11 @@ export default {
     return {
       editingRate: false,
       rateInput: '',
+      // Same reasoning as DebtCard/DebtsScreen's own submitting guards —
+      // neither the db layer nor the store rejects a second concurrent
+      // addRate() call, and a double-tap on Сохранить would otherwise
+      // create two rate segments for the same date.
+      submitting: false,
     };
   },
   computed: {
@@ -5825,10 +5843,19 @@ export default {
       this.editingRate = true;
     },
     async saveRate() {
-      const amount = parseFloat(this.rateInput);
-      if (!amount) return;
-      await this.budgetRatesStore.setRate(amount);
-      this.editingRate = false;
+      if (this.submitting) return;
+      const amount = parsePositiveAmount(this.rateInput);
+      if (!amount) {
+        useToastStore().show('Сумма должна быть больше нуля');
+        return;
+      }
+      this.submitting = true;
+      try {
+        await this.budgetRatesStore.setRate(amount);
+        this.editingRate = false;
+      } finally {
+        this.submitting = false;
+      }
     },
   },
 };
@@ -5837,6 +5864,17 @@ export default {
 <style lang="scss">
 .settings-group {
   margin-bottom: 22px;
+
+  // Same treatment as CategoryPie's own section label (fixed alongside this
+  // task after that one turned out to have no rule of its own at all) —
+  // kept as its own scoped rule rather than a shared class, matching this
+  // codebase's per-component BEM convention.
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin: 0 0 10px;
+  }
 }
 
 .settings-list {
@@ -5857,6 +5895,12 @@ export default {
   }
 
   &__value {
+    // min-height, not just relying on the row's own padding — a button's
+    // hit box is its own content box regardless of a non-button ancestor's
+    // padding, the same emergent-height gap already found on every other
+    // icon/text button this session (TabBar, MonthNav, CategoryTree's
+    // more-button, etc.).
+    min-height: 44px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -5868,6 +5912,7 @@ export default {
   &__rate-form {
     display: flex;
     gap: 8px;
+    align-items: center;
   }
 
   &__rate-input {
@@ -5880,6 +5925,9 @@ export default {
   }
 
   &__rate-save {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
     color: var(--accent-strong);
     font-weight: 600;
     font-size: 13px;

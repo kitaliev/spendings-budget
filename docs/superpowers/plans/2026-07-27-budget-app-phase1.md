@@ -5105,10 +5105,33 @@ describe('DebtsScreen', () => {
     expect(names).toEqual(['Ипотека']);
   });
 
+  it('marks the active segment with aria-current', async () => {
+    const wrapper = mount(DebtsScreen);
+    const opts = wrapper.findAll('.segmented__opt');
+    expect(opts[0].attributes('aria-current')).toBe('true');
+    expect(opts[1].attributes('aria-current')).toBeUndefined();
+    await opts[1].trigger('click');
+    expect(opts[0].attributes('aria-current')).toBeUndefined();
+    expect(opts[1].attributes('aria-current')).toBe('true');
+  });
+
+  it('re-filters the closed list too when direction switches, not just the open one', async () => {
+    const wrapper = mount(DebtsScreen);
+    await wrapper.findAll('.segmented__opt')[1].trigger('click'); // -> i_owe, which has no closed debts
+    expect(wrapper.find('.closed-toggle').exists()).toBe(false);
+  });
+
   it('shows the closed count and keeps the list collapsed by default', () => {
     const wrapper = mount(DebtsScreen);
     expect(wrapper.find('.closed-toggle').text()).toContain('1');
     expect(wrapper.find('.closed-list').exists()).toBe(false);
+  });
+
+  it('hides the closed-toggle entirely when there are no closed debts, rather than showing a dead-end "Закрытые (0)"', () => {
+    const store = useDebtsStore();
+    store.payments = []; // nothing paid off -> nothing closed, in either direction
+    const wrapper = mount(DebtsScreen);
+    expect(wrapper.find('.closed-toggle').exists()).toBe(false);
   });
 
   it('expands the closed list when the toggle is clicked', async () => {
@@ -5145,26 +5168,29 @@ Expected: FAIL — module `./DebtsScreen.vue` does not exist.
         type="button"
         class="segmented__opt"
         :class="{ 'segmented__opt--active': option.value === direction }"
+        :aria-current="option.value === direction ? 'true' : null"
         @click="direction = option.value"
       >{{ option.label }}</button>
     </div>
 
     <DebtCard v-for="debt in openDebts" :key="debt.id" :debt="debt" />
 
-    <button
-      type="button"
-      class="closed-toggle"
-      :aria-expanded="closedOpen ? 'true' : 'false'"
-      @click="closedOpen = !closedOpen"
-    >
-      <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
-    </button>
-    <div v-if="closedOpen" class="closed-list">
-      <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
-        <span class="closed-card__name">{{ debt.name }}</span>
-        <span>{{ formatMoney(debt.amount) }}</span>
+    <template v-if="closedDebts.length > 0">
+      <button
+        type="button"
+        class="closed-toggle"
+        :aria-expanded="closedOpen ? 'true' : 'false'"
+        @click="closedOpen = !closedOpen"
+      >
+        <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
+      </button>
+      <div v-if="closedOpen" class="closed-list">
+        <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
+          <span class="closed-card__name">{{ debt.name }}</span>
+          <span>{{ formatMoney(debt.amount) }}</span>
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -5205,6 +5231,15 @@ export default {
 </script>
 
 <style lang="scss">
+.debts-screen {
+  // Same gap as BudgetDashboard (commit 3e90b0c): every child here (TopBar,
+  // segmented control, DebtCard, closed-toggle) only specifies its own
+  // small internal padding, none of it enough alone to keep content off
+  // the physical screen edges. Confirmed by rendering this composed with
+  // real data at a real 390px viewport.
+  padding: 0 18px;
+}
+
 .segmented {
   display: flex;
   background: var(--surface-sunken);
@@ -5217,8 +5252,9 @@ export default {
     // min-height + flex-centering, not just padding — 8px vertical padding
     // plus a 13.5px line-height lands well under the 44px touch-target
     // minimum (the same emergent-height gap already found and fixed on
-    // MonthChart's columns, BudgetDashboard's settings button, and
-    // DebtCard's top row).
+    // TabBar's items, BudgetDashboard's settings button, and DebtCard's
+    // top row — MonthChart's own bug was a different shape, a button's UA
+    // padding shrinking a percentage-width child, not a height shortfall).
     min-height: 44px;
     display: flex;
     align-items: center;
@@ -5242,6 +5278,12 @@ export default {
   display: flex;
   align-items: center;
   gap: 6px;
+  // Same emergent-height gap as .segmented__opt above (measured at 34px in a
+  // real browser with just the 10px/10px padding and a 12.5px text line) —
+  // min-height clears the 44px touch-target minimum while align-items:
+  // center (already needed for the chevron+label row) keeps the content
+  // centered rather than pinned to the top.
+  min-height: 44px;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink-muted);
@@ -5268,7 +5310,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/debts/DebtsScreen.spec.js`
-Expected: PASS (5 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -6641,26 +6683,29 @@ Replace the `<template>` block with:
         type="button"
         class="segmented__opt"
         :class="{ 'segmented__opt--active': option.value === direction }"
+        :aria-current="option.value === direction ? 'true' : null"
         @click="direction = option.value"
       >{{ option.label }}</button>
     </div>
 
     <DebtCard v-for="debt in openDebts" :key="debt.id" :debt="debt" />
 
-    <button
-      type="button"
-      class="closed-toggle"
-      :aria-expanded="closedOpen ? 'true' : 'false'"
-      @click="closedOpen = !closedOpen"
-    >
-      <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
-    </button>
-    <div v-if="closedOpen" class="closed-list">
-      <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
-        <span class="closed-card__name">{{ debt.name }}</span>
-        <span>{{ formatMoney(debt.amount) }}</span>
+    <template v-if="closedDebts.length > 0">
+      <button
+        type="button"
+        class="closed-toggle"
+        :aria-expanded="closedOpen ? 'true' : 'false'"
+        @click="closedOpen = !closedOpen"
+      >
+        <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
+      </button>
+      <div v-if="closedOpen" class="closed-list">
+        <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
+          <span class="closed-card__name">{{ debt.name }}</span>
+          <span>{{ formatMoney(debt.amount) }}</span>
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 ```
@@ -6761,7 +6806,7 @@ Add to the `<style lang="scss">` block:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npm test -- src/components/debts/DebtsScreen.spec.js`
-Expected: PASS (11 tests total — 5 from Task 22 plus 6 new).
+Expected: PASS (14 tests total — 8 from Task 22 plus 6 new).
 
 - [ ] **Step 5: Commit**
 

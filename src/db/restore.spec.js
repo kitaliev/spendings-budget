@@ -37,4 +37,24 @@ describe('restoreAllFromSnapshot', () => {
     const categories = await db.getAll('categories');
     expect(categories.map((c) => c.id)).toEqual(['fresh']);
   });
+
+  it('a row missing an optional field is stored as-is, with that field simply absent', async () => {
+    await restoreAllFromSnapshot({
+      categories: [{ id: 'c1', name: 'Еда', emoji: '🍔' }], // no parentId, no archived
+      transactions: [], budgetRates: [], debts: [], debtPayments: [],
+    });
+    const db = await getDb();
+    const stored = await db.get('categories', 'c1');
+    expect(stored).toEqual({ id: 'c1', name: 'Еда', emoji: '🍔' });
+  });
+
+  it('a row with an unexpected extra field preserves that field rather than dropping it', async () => {
+    await restoreAllFromSnapshot({
+      categories: [{ id: 'c1', name: 'Еда', emoji: '🍔', parentId: null, archived: false, futureField: 'x' }],
+      transactions: [], budgetRates: [], debts: [], debtPayments: [],
+    });
+    const db = await getDb();
+    const stored = await db.get('categories', 'c1');
+    expect(stored.futureField).toBe('x');
+  });
 });

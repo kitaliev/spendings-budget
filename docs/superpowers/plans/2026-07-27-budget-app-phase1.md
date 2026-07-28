@@ -6798,11 +6798,12 @@ Expected: FAIL — module `./TransactionList.vue` does not exist.
 ```vue
 <template>
   <div class="transaction-list">
-    <p class="section-title">Транзакции за месяц</p>
+    <p class="transaction-list__title">Транзакции за месяц</p>
     <p v-if="rows.length === 0" class="transaction-list__empty">Пока нет расходов в этом месяце</p>
     <button
       v-for="row in rows"
       :key="row.transaction.id"
+      type="button"
       class="transaction-list__row"
       @click="$emit('edit', row.transaction)"
     >
@@ -6854,6 +6855,17 @@ export default {
 .transaction-list {
   padding-bottom: 12px;
 
+  // Same treatment as CategoryPie's and SettingsScreen's own section labels
+  // (own scoped rule, not a shared/global class — .section-title doesn't
+  // exist anywhere in this codebase and was already found and fixed twice
+  // this session for exactly this reason, Tasks 19/20 and 24).
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin: 0 0 10px;
+  }
+
   &__empty {
     font-size: 13px;
     color: var(--ink-muted);
@@ -6861,6 +6873,10 @@ export default {
   }
 
   &__row {
+    // min-height, not just the 9px vertical padding — the same emergent-
+    // height gap already found and fixed on every other row/button this
+    // session (DebtCard's top row, CategoryTree's tree-row, etc.).
+    min-height: 44px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -6939,7 +6955,7 @@ Add to the end of the `<template>`, right after `<CategoryPie :month-key="curren
 - [ ] **Step 8: Run test to verify it passes**
 
 Run: `npm test -- src/components/budget/BudgetDashboard.spec.js`
-Expected: PASS (8 tests total — 7 from Task 20 plus 1 new).
+Expected: PASS (10 tests total — 9 already in this file as of Task 20 plus 1 new; check the actual current file, since review rounds since Task 20 may have changed this count).
 
 - [ ] **Step 9: Add the failing test for App-level wiring to `src/App.spec.js`**
 
@@ -6998,7 +7014,7 @@ openEditModal(transaction) {
 - [ ] **Step 12: Run test to verify it passes**
 
 Run: `npm test -- src/App.spec.js`
-Expected: PASS (8 tests total — 6 from Task 25 plus 2 new).
+Expected: PASS (13 tests total — 11 already in this file as of Task 25's code-quality-review fixes plus 2 new; check the actual current file's test count first, do not assume 6 — Task 25's own review added several tests beyond its original draft).
 
 - [ ] **Step 13: Run the full test suite one more time**
 

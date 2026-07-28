@@ -25,6 +25,8 @@
     <MonthChart :months="chartMonths" @select="goToMonth" />
 
     <CategoryPie :month-key="currentMonthKey" />
+
+    <TransactionList :month-key="currentMonthKey" @edit="$emit('edit-transaction', $event)" />
   </div>
 </template>
 
@@ -33,6 +35,7 @@ import TopBar from '../layout/TopBar.vue';
 import MonthNav from '../layout/MonthNav.vue';
 import MonthChart from './MonthChart.vue';
 import CategoryPie from './CategoryPie.vue';
+import TransactionList from './TransactionList.vue';
 import { useBudgetStore } from '../../stores/budget.js';
 import { formatMoney } from '../../utils/currency.js';
 import { todayKey, toMonthKey, monthNameWithYear } from '../../utils/date.js';
@@ -60,13 +63,13 @@ function shiftMonth(monthKey, delta) {
 
 export default {
   name: 'BudgetDashboard',
-  components: { TopBar, MonthNav, MonthChart, CategoryPie },
+  components: { TopBar, MonthNav, MonthChart, CategoryPie, TransactionList },
   // No store .load() call anywhere in this file, on purpose: screen-level
   // components only read reactive state that App.vue already loaded once at
   // startup. Keeps loading in one place and lets this component's own tests
   // seed store state directly with no load() racing in to overwrite it.
   // Apply the same rule to any other screen-level component.
-  emits: ['open-settings'],
+  emits: ['open-settings', 'edit-transaction'],
   data() {
     return {
       currentMonthKey: toMonthKey(todayKey()),

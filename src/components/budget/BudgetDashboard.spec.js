@@ -91,3 +91,12 @@ describe('BudgetDashboard settings access', () => {
     expect(wrapper.emitted('open-settings')).toHaveLength(1);
   });
 });
+
+describe('BudgetDashboard — transaction list', () => {
+  it('forwards TransactionList\'s edit event as edit-transaction', async () => {
+    const wrapper = mount(BudgetDashboard);
+    const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
+    await wrapper.findComponent({ name: 'TransactionList' }).vm.$emit('edit', transaction);
+    expect(wrapper.emitted('edit-transaction')[0]).toEqual([transaction]);
+  });
+});

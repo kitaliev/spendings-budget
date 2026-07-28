@@ -2,7 +2,11 @@
   <div id="app-shell" class="app-shell">
     <div class="app-shell__content" :inert="showSettings">
       <template v-if="ready">
-        <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
+        <BudgetDashboard
+          v-if="activeTab === 'budget'"
+          @open-settings="showSettings = true"
+          @edit-transaction="openEditModal"
+        />
         <DebtsScreen v-else />
       </template>
       <p v-else class="app-shell__loading">Загрузка…</p>
@@ -85,6 +89,10 @@ export default {
   methods: {
     openAddModal() {
       this.editingTransaction = null;
+      this.showExpenseModal = true;
+    },
+    openEditModal(transaction) {
+      this.editingTransaction = transaction;
       this.showExpenseModal = true;
     },
     closeExpenseModal() {

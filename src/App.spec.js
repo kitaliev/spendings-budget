@@ -163,3 +163,25 @@ describe('App navigation', () => {
     expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('false');
   });
 });
+
+describe('App — editing a transaction from the dashboard list', () => {
+  it('opens the expense modal in edit mode with the selected transaction', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
+    await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('edit-transaction', transaction);
+    await wrapper.vm.$nextTick();
+    const modal = wrapper.findComponent({ name: 'ExpenseModal' });
+    expect(modal.props('visible')).toBe(true);
+    expect(modal.props('editingTransaction')).toEqual(transaction);
+  });
+
+  it('clears editingTransaction after the modal closes, so the next FAB tap starts a fresh entry', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
+    await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('edit-transaction', transaction);
+    await wrapper.findComponent({ name: 'ExpenseModal' }).vm.$emit('close');
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('editingTransaction')).toBeNull();
+  });
+});

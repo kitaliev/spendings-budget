@@ -36,6 +36,16 @@ export function monthNameWithYear(monthKey) {
   return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${year}`;
 }
 
+// "27 июл." — a compact day+month display, shared by DatePicker's "other
+// date" label and any place needing to show a stored date key (e.g. a debt
+// payment's date) as something more readable than a raw YYYY-MM-DD string.
+// Built from local-time parts, not `new Date(dateKey)` — same UTC-parsing
+// hazard as toDateKey.
+export function shortDate(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
 export function daysInMonth(monthKey) {
   const [y, m] = monthKey.split('-').map(Number);
   return new Date(y, m, 0).getDate();

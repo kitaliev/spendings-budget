@@ -8,7 +8,10 @@
       <span class="debt-card__amount">{{ formatMoney(remaining) }}</span>
     </button>
 
-    <div class="debt-card__meter">
+    <!-- Purely decorative reinforcement of the percentage/total already
+         spelled out as text right below — same treatment as CategoryPie's
+         chart circle. -->
+    <div class="debt-card__meter" aria-hidden="true">
       <div class="debt-card__meter-fill" :style="{ width: paidPct + '%' }"></div>
     </div>
     <div class="debt-card__meta">
@@ -21,7 +24,7 @@
         <span>Платежей ещё нет</span>
       </div>
       <div v-for="payment in payments" :key="payment.id" class="debt-card__hist-row">
-        <span>{{ payment.date }}</span>
+        <span>{{ shortDate(payment.date) }}</span>
         <span>{{ formatMoney(payment.amount) }}</span>
       </div>
       <form class="debt-card__pay-form" @submit.prevent="submitPayment">
@@ -36,7 +39,7 @@
 import { useDebtsStore } from '../../stores/debts.js';
 import { useToastStore } from '../../stores/toast.js';
 import { formatMoney } from '../../utils/currency.js';
-import { todayKey } from '../../utils/date.js';
+import { todayKey, shortDate } from '../../utils/date.js';
 
 export default {
   name: 'DebtCard',
@@ -70,11 +73,16 @@ export default {
     },
     paidPct() {
       if (this.debt.amount === 0) return 0;
-      return Math.round(((this.debt.amount - this.remaining) / this.debt.amount) * 100);
+      // Clamped at 100 — overpaying a debt (remaining goes negative) is
+      // possible and already handled correctly by the headline figure
+      // itself, but "Выплачено 120%" reads as a bug rather than a real
+      // state, and the meter bar has no reason to run past its own track.
+      return Math.min(100, Math.round(((this.debt.amount - this.remaining) / this.debt.amount) * 100));
     },
   },
   methods: {
     formatMoney,
+    shortDate,
     async submitPayment() {
       if (this.submitting) return;
       // A native number input still allows a leading "-" regardless of
@@ -109,12 +117,29 @@ export default {
   margin-bottom: 12px;
 
   &__top {
+    position: relative;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     width: 100%;
     text-align: left;
     gap: 10px;
+
+    // This row's own height is emergent (one line with no comment measures
+    // ~24px, well under the 44px accessible touch-target minimum — verified
+    // in a real browser) — widened via an invisible hit area rather than
+    // forcing extra visual height that would look like empty padding on a
+    // short card. -10px vertically is enough to clear 44px even for the
+    // shortest (no-comment) case; horizontal expansion isn't needed since
+    // the button already spans the card's full width.
+    &::before {
+      content: '';
+      position: absolute;
+      top: -10px;
+      bottom: -10px;
+      left: 0;
+      right: 0;
+    }
   }
 
   &__name {
@@ -186,6 +211,17 @@ export default {
     padding: 10px;
     font-family: var(--font-money);
     font-size: 14px;
+    // Hide the native up/down stepper — every other numeric-ish input in
+    // this app is either fully custom (Keypad) or visually hidden
+    // (DatePicker's native date input), so a bare spinner here would be the
+    // one unstyled system control left in the whole UI.
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
   }
 
   &__pay-btn {

@@ -10,7 +10,11 @@ beforeEach(() => {
   setActivePinia(createPinia());
   const store = useDebtsStore();
   store.items = [debt];
-  store.payments = [{ id: 'p1', debtId: 'd1', amount: 5000, date: '02.07.2026' }];
+  // A real YYYY-MM-DD key, matching every actual production producer
+  // (todayKey(), the db layer) — not the DD.MM.YYYY-with-dots shape used
+  // here before, which happened to look pre-formatted and masked the fact
+  // that the component was rendering the raw key unformatted.
+  store.payments = [{ id: 'p1', debtId: 'd1', amount: 5000, date: '2026-07-02' }];
 });
 
 describe('DebtCard', () => {
@@ -30,10 +34,25 @@ describe('DebtCard', () => {
     expect(wrapper.find('.debt-card__detail').exists()).toBe(false);
   });
 
-  it('shows payment history after tapping the card', async () => {
+  it('shows payment history after tapping the card, with the date formatted for reading rather than a raw key', async () => {
     const wrapper = mount(DebtCard, { props: { debt } });
     await wrapper.find('.debt-card__top').trigger('click');
-    expect(wrapper.find('.debt-card__hist-row').text()).toContain('02.07.2026');
+    expect(wrapper.find('.debt-card__hist-row').text()).toContain('2 июл.');
+  });
+
+  it('closes the history again on a second tap', async () => {
+    const wrapper = mount(DebtCard, { props: { debt } });
+    await wrapper.find('.debt-card__top').trigger('click');
+    await wrapper.find('.debt-card__top').trigger('click');
+    expect(wrapper.find('.debt-card__detail').exists()).toBe(false);
+  });
+
+  it('clamps the paid percentage at 100 for an overpaid debt, instead of reading e.g. 120%', () => {
+    const store = useDebtsStore();
+    store.payments = [{ id: 'p1', debtId: 'd1', amount: 18000, date: '2026-07-02' }];
+    const wrapper = mount(DebtCard, { props: { debt } });
+    // Without clamping this would read 120% (18000/15000): (15000-(-3000))/15000*100.
+    expect(wrapper.find('.debt-card__meta').text()).toContain('100%');
   });
 
   it('records a new payment through the pay form and updates the remaining balance', async () => {

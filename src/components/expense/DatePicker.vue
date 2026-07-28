@@ -26,7 +26,7 @@
 </template>
 
 <script>
-import { todayKey, yesterdayKey } from '../../utils/date.js';
+import { todayKey, yesterdayKey, shortDate } from '../../utils/date.js';
 
 export default {
   name: 'DatePicker',
@@ -49,11 +49,7 @@ export default {
       // existing "other" date (e.g. Task 17 editing a past transaction), not
       // only after the native input's own change handler has fired once.
       if (this.mode !== 'other') return 'Другая дата';
-      // Build the label from local-time parts, not `new Date(value)` — a bare
-      // YYYY-MM-DD string parses as UTC midnight and can render one day off
-      // for anyone west of UTC (same class of bug fixed in Task 5's toDateKey).
-      const [y, m, d] = this.modelValue.split('-').map(Number);
-      return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      return shortDate(this.modelValue);
     },
   },
   methods: {

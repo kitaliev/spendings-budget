@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { toDateKey, toMonthKey, todayKey, yesterdayKey, daysInMonth, daysElapsedInMonth, monthNameWithYear } from './date.js';
+import { toDateKey, toMonthKey, todayKey, yesterdayKey, daysInMonth, daysElapsedInMonth, monthNameWithYear, shortDate } from './date.js';
 
 describe('toDateKey', () => {
   it('formats a Date as YYYY-MM-DD', () => {
@@ -54,6 +54,16 @@ describe('monthNameWithYear', () => {
     expect(monthNameWithYear('2026-03')).toBe('Март 2026');
     expect(monthNameWithYear('2026-08')).toBe('Август 2026');
     expect(monthNameWithYear('2026-12')).toBe('Декабрь 2026');
+  });
+});
+
+describe('shortDate', () => {
+  it('formats a date key as day + abbreviated month', () => {
+    expect(shortDate('2026-07-27')).toBe('27 июл.');
+  });
+
+  it('does not shift the day for a date key (local-time parts, not new Date(string))', () => {
+    expect(shortDate('2026-01-01')).toBe('1 янв.');
   });
 });
 

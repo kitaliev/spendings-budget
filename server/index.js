@@ -67,6 +67,22 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+const SNAPSHOT_KEYS = ['categories', 'transactions', 'budgetRates', 'debts', 'debtPayments'];
+
+// A minimal shape guard at the HTTP boundary — overwriteFromSnapshot itself
+// trusts its input completely (delete-then-reinsert, whatever it's given),
+// so this is the only thing standing between a malformed body and real data
+// loss. A wrong-typed value (e.g. `{ categories: "oops" }`) would otherwise
+// pass straight through: a string has a `.length` and is iterable
+// character-by-character, so it never throws — it just deletes every real
+// row in that table and inserts one junk all-NULL row per character.
+// Belongs here rather than in db.js because this is HTTP input validation,
+// the same way /api/login already validates its own body at this layer.
+function isValidSnapshot(snapshot) {
+  if (typeof snapshot !== 'object' || snapshot === null || Array.isArray(snapshot)) return false;
+  return SNAPSHOT_KEYS.every((key) => !(key in snapshot) || Array.isArray(snapshot[key]));
+}
+
 // Every non-API GET falls back to index.html if the exact file doesn't
 // exist — this app has no URL-based routing (a single tab-state-driven SPA),
 // so there's no real "unknown route" case to distinguish from "the app
@@ -77,11 +93,27 @@ function sendJson(res, status, body) {
 // the bug Task 5 fixed — writeHead has already fired by the time a stream
 // error can happen, so the best available response at that point is to log
 // server-side and just end the connection, not attempt a second status code.
-function serveStatic(req, res) {
+// distDir is a parameter (not the module-level DIST_DIR directly) for the
+// same reason hashPath/dbPath/backupDir are threaded through createApp:
+// tests need to point it at a throwaway directory instead of the real
+// (not-yet-built, in this worktree nonexistent) dist/.
+function serveStatic(req, res, distDir) {
   const requestedPath = req.url === '/' ? '/index.html' : req.url;
-  let filePath = path.join(DIST_DIR, requestedPath);
-  if (!filePath.startsWith(DIST_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(DIST_DIR, 'index.html');
+  let filePath = path.join(distDir, requestedPath);
+  try {
+    if (!filePath.startsWith(distDir) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      filePath = path.join(distDir, 'index.html');
+    }
+  } catch {
+    // fs.existsSync swallows its own errors and returns false, but statSync
+    // can still throw synchronously — e.g. a TOCTOU race where a concurrent
+    // deploy removes the file between the existsSync check above and this
+    // statSync call. Without this catch, that throw would only happen to be
+    // caught by requestListener's outer try/catch (since writeHead hasn't
+    // run yet at this point) rather than being something this function
+    // accounts for itself — fall back to index.html the same way a plain
+    // missing file already does.
+    filePath = path.join(distDir, 'index.html');
   }
   const ext = path.extname(filePath);
   res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
@@ -93,10 +125,10 @@ function serveStatic(req, res) {
   stream.pipe(res);
 }
 
-// hashPath/dbPath/backupDir are passed in (rather than read from module-level
-// constants) so tests can point every file operation at throwaway paths
-// instead of the real server/data directory.
-export function createApp(db, { hashPath, dbPath, backupDir }) {
+// hashPath/dbPath/backupDir/distDir are passed in (rather than read from
+// module-level constants) so tests can point every file operation at
+// throwaway paths instead of the real server/data directory.
+export function createApp(db, { hashPath, dbPath, backupDir, distDir = DIST_DIR }) {
   return async function requestListener(req, res) {
     // Wraps the entire route dispatch: readBody's rejections (malformed JSON,
     // oversized body) are awaited below with nothing else to catch them, so
@@ -132,6 +164,20 @@ export function createApp(db, { hashPath, dbPath, backupDir }) {
       if (req.url === '/api/sync' && req.method === 'POST') {
         if (!isValidSession(sessionId)) return sendJson(res, 401, { ok: false, error: 'Не авторизован' });
         const snapshot = await readBody(req);
+        if (!isValidSnapshot(snapshot)) return sendJson(res, 400, { ok: false, error: 'Некорректный формат данных' });
+        // WAL mode (set in openDatabase) buffers writes in a separate -wal
+        // file that isn't folded back into the main .sqlite file until a
+        // checkpoint happens — by default, only after ~1000 WAL pages or on
+        // connection close, thresholds this app's real write volume may
+        // never hit on its own since the process stays up indefinitely.
+        // rotateBackup copies just the main file, so without an explicit
+        // checkpoint first, the "backup" it produces can be a stale or
+        // outright empty file — verified directly: an unchecked copy taken
+        // right after a write, opened as an independent connection, fails
+        // with "no such table: categories" even though the live connection
+        // still sees the data fine. TRUNCATE also resets the -wal file back
+        // to empty, so it doesn't grow unbounded across repeated syncs.
+        db.pragma('wal_checkpoint(TRUNCATE)');
         rotateBackup(dbPath, backupDir);
         overwriteFromSnapshot(db, snapshot);
         return sendJson(res, 200, { ok: true });
@@ -146,7 +192,7 @@ export function createApp(db, { hashPath, dbPath, backupDir }) {
         return sendJson(res, 404, { ok: false, error: 'Not found' });
       }
 
-      serveStatic(req, res);
+      serveStatic(req, res, distDir);
     } catch (err) {
       console.error('[requestListener]', err);
       sendJson(res, 400, { ok: false, error: 'Некорректный запрос' });

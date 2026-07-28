@@ -6538,14 +6538,33 @@ describe('CategoryTree — adding a category', () => {
     );
   });
 
-  it('does not submit without a name', async () => {
+  it('does not submit without a name, showing a toast instead', async () => {
     seed();
     const wrapper = mount(CategoryTree);
     await wrapper.find('.category-tree__add-toggle').trigger('click');
     await wrapper.find('.category-tree__add-form').trigger('submit');
     expect(categoriesDb.createCategory).not.toHaveBeenCalled();
+    expect(useToastStore().message).toBe('Введите название');
+  });
+
+  it('defaults to 📁 when no emoji is entered', async () => {
+    seed();
+    categoriesDb.createCategory.mockResolvedValue({ id: 'new3', name: 'Прочее', emoji: '📁', parentId: null, archived: false });
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-name').setValue('Прочее');
+    await wrapper.find('.category-tree__add-form').trigger('submit');
+    expect(categoriesDb.createCategory).toHaveBeenCalledWith(
+      expect.objectContaining({ emoji: '📁' })
+    );
   });
 });
+```
+
+This also needs `useToastStore` imported at the top of the test file, alongside the existing store imports:
+
+```js
+import { useToastStore } from '../../stores/toast.js';
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -6555,47 +6574,29 @@ Expected: FAIL — `.category-tree__add-toggle` does not exist yet.
 
 - [ ] **Step 3: Update `src/components/settings/CategoryTree.vue`**
 
-Replace the `<template>` block with:
+**Important:** Task 23's own code-quality review already changed this file since this plan section was first drafted (see that task's own "Note added during code-quality review" above) — it added `:inert` on `.tree-row__actions`, `type="button"`/`aria-expanded` on `.tree-row__more`, removed the dead `tree-row--sub` class, and refactored `flattenTree`. **Do not revert any of that.** The instructions below only ADD the toggle/form above the existing `tree-row` markup — they do not replace it.
+
+Insert this new `<button>` and `<form>` as the first two children of `.category-tree`'s `<div>`, immediately before the existing `<div v-for="row in rows" ...>` (leave everything from that line down completely untouched):
 
 ```vue
-<template>
-  <div class="category-tree">
-    <button class="category-tree__add-toggle" @click="addingOpen = !addingOpen">
-      {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
-    </button>
+<button type="button" class="category-tree__add-toggle" @click="addingOpen = !addingOpen">
+  {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
+</button>
 
-    <form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
-      <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="4" />
-      <input v-model="newName" class="category-tree__add-name" placeholder="Название" />
-      <select v-model="newParentId" class="category-tree__add-parent">
-        <option :value="null">Без родителя</option>
-        <option v-for="row in rows" :key="row.category.id" :value="row.category.id">
-          {{ '—'.repeat(row.depth) }} {{ row.category.name }}
-        </option>
-      </select>
-      <button type="submit" class="category-tree__add-submit">Создать</button>
-    </form>
-
-    <div
-      v-for="row in rows"
-      :key="row.category.id"
-      class="tree-row"
-      :class="{ 'tree-row--sub': row.depth > 0, 'tree-row--revealed': revealedId === row.category.id }"
-      :style="{ paddingLeft: 14 + row.depth * 24 + 'px' }"
-    >
-      <span class="tree-row__emoji">{{ row.category.emoji }}</span>
-      <span class="tree-row__name">{{ row.category.name }}</span>
-      <button class="tree-row__more" aria-label="Действия" @click="toggleRevealed(row.category.id)">⋯</button>
-      <div class="tree-row__actions">
-        <button class="tree-row__action tree-row__action--archive" @click="archive(row.category.id)">Архив</button>
-        <button class="tree-row__action tree-row__action--delete" @click="confirmDelete(row.category)">Удалить</button>
-      </div>
-    </div>
-  </div>
-</template>
+<form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
+  <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="4" />
+  <input v-model="newName" class="category-tree__add-name" placeholder="Название" />
+  <select v-model="newParentId" class="category-tree__add-parent">
+    <option :value="null">Без родителя</option>
+    <option v-for="row in rows" :key="row.category.id" :value="row.category.id">
+      {{ '—'.repeat(row.depth) }} {{ row.category.name }}
+    </option>
+  </select>
+  <button type="submit" class="category-tree__add-submit">Создать</button>
+</form>
 ```
 
-Add to `data()` (merge with the existing returned object):
+Add to `data()` (merge with the existing returned object — `revealedId` stays):
 
 ```js
 data() {
@@ -6605,36 +6606,60 @@ data() {
     newName: '',
     newEmoji: '',
     newParentId: null,
+    // Same reasoning as every other submitting guard this session — neither
+    // the db layer nor the store rejects a second concurrent create() call.
+    submitting: false,
   };
 },
 ```
 
-Add to `methods` (merge with the existing methods):
+Add to `methods` (merge with the existing methods — `toggleRevealed`/`archive`/`transactionCountFor`/`confirmDelete` stay untouched):
 
 ```js
 async submitAdd() {
-  if (!this.newName.trim()) return;
-  await this.categoriesStore.create({
-    name: this.newName.trim(),
-    emoji: this.newEmoji.trim() || '📁',
-    parentId: this.newParentId,
-  });
-  this.newName = '';
-  this.newEmoji = '';
-  this.newParentId = null;
-  this.addingOpen = false;
+  if (this.submitting) return;
+  const name = this.newName.trim();
+  if (!name) {
+    useToastStore().show('Введите название');
+    return;
+  }
+  this.submitting = true;
+  try {
+    await this.categoriesStore.create({
+      name,
+      emoji: this.newEmoji.trim() || '📁',
+      parentId: this.newParentId,
+    });
+    this.newName = '';
+    this.newEmoji = '';
+    this.newParentId = null;
+    this.addingOpen = false;
+  } finally {
+    this.submitting = false;
+  }
 },
 ```
 
-Add to the `<style lang="scss">` block:
+This also needs `useToastStore` imported (it isn't yet in this file) — add alongside the existing store imports:
+
+```js
+import { useToastStore } from '../../stores/toast.js';
+```
+
+Add to the `<style lang="scss">` block, alongside the existing `.tree-row { ... }` rule (as a sibling top-level rule, same file):
 
 ```scss
 .category-tree {
   &__add-toggle {
-    display: block;
+    // min-height + flex-centering, not just padding — the same emergent-
+    // height gap already found and fixed on every other text/icon button
+    // this session (CategoryTree's own tree-row__more among them).
+    min-height: 44px;
+    display: flex;
+    align-items: center;
     width: 100%;
     text-align: left;
-    padding: 10px 14px;
+    padding: 0 14px;
     font-size: 13.5px;
     font-weight: 600;
     color: var(--accent-strong);
@@ -6645,6 +6670,7 @@ Add to the `<style lang="scss">` block:
     gap: 6px;
     padding: 0 14px 12px;
     flex-wrap: wrap;
+    align-items: center;
   }
 
   &__add-emoji {
@@ -6665,6 +6691,11 @@ Add to the `<style lang="scss">` block:
   }
 
   &__add-parent {
+    // Same min-height reasoning as __add-toggle above — a native <select>
+    // with just 6px vertical padding and a 13px line renders well under
+    // the 44px touch-target minimum on a real phone, same as a custom
+    // button would.
+    min-height: 44px;
     background: var(--surface-sunken);
     border-radius: 8px;
     padding: 6px 8px;
@@ -6672,10 +6703,13 @@ Add to the `<style lang="scss">` block:
   }
 
   &__add-submit {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
     color: var(--accent-strong);
     font-weight: 600;
     font-size: 13px;
-    padding: 6px 8px;
+    padding: 6px 12px;
   }
 }
 ```
@@ -6683,7 +6717,7 @@ Add to the `<style lang="scss">` block:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npm test -- src/components/settings/CategoryTree.spec.js`
-Expected: PASS (9 tests total — 5 from Task 23 plus 4 new).
+Expected: PASS (11 tests total — 6 from Task 23 plus 5 new).
 
 - [ ] **Step 5: Commit**
 

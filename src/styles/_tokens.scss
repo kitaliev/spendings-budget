@@ -8,7 +8,13 @@
   --surface-sunken: #EDEFEE;
   --ink: #14191B;
   --ink-secondary: #52585B;
-  --ink-muted: #82898C;
+  // #82898C only reached 3.25:1 against --ground / 3.56:1 against --surface
+  // — both below the 4.5:1 WCAG AA minimum for normal text, and this token
+  // is used at normal/small sizes for meaningful (non-decorative) text in
+  // most components. Darkened within the same low-saturation grey (same
+  // hue/sat, just lower lightness) to clear AA against the harder of the
+  // two surfaces it's actually used on: 4.66:1 / 5.10:1.
+  --ink-muted: #696F72;
   --accent: #A9762C;
   --accent-strong: #8F621F;
   --accent-ink: #FFFFFF;
@@ -30,7 +36,12 @@
     --surface-sunken: #0C1114;
     --ink: #EEEAE1;
     --ink-secondary: #A7ADAF;
-    --ink-muted: #6E7679;
+    // #6E7679 only reached 3.93:1 against --ground / 3.48:1 against
+    // --surface — below AA. Lightened within the same grey (same hue/sat,
+    // higher lightness) to clear AA against the harder surface: 5.17:1 /
+    // 4.58:1. See the light-theme --ink-muted comment above for the same
+    // underlying issue.
+    --ink-muted: #818A8D;
     --accent: #CC9F55;
     --accent-strong: #E0B565;
     --accent-ink: #171106;
@@ -55,7 +66,7 @@
   --surface-sunken: #0C1114;
   --ink: #EEEAE1;
   --ink-secondary: #A7ADAF;
-  --ink-muted: #6E7679;
+  --ink-muted: #818A8D; // same WCAG-AA fix as the dark-mode block above
   --accent: #CC9F55;
   --accent-strong: #E0B565;
   --accent-ink: #171106;
@@ -76,7 +87,7 @@
   --surface-sunken: #EDEFEE;
   --ink: #14191B;
   --ink-secondary: #52585B;
-  --ink-muted: #82898C;
+  --ink-muted: #696F72; // same WCAG-AA fix as the light-theme block above
   --accent: #A9762C;
   --accent-strong: #8F621F;
   --accent-ink: #FFFFFF;

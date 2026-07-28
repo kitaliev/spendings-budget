@@ -140,6 +140,18 @@ describe('CategoryTree — adding a category', () => {
     );
   });
 
+  it('clears a typed draft when the form is canceled, rather than resurfacing it on reopen', async () => {
+    seed();
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-emoji').setValue('💊');
+    await wrapper.find('.category-tree__add-name').setValue('Здоровье');
+    await wrapper.find('.category-tree__add-toggle').trigger('click'); // ‹ Отмена
+    await wrapper.find('.category-tree__add-toggle').trigger('click'); // reopen
+    expect(wrapper.find('.category-tree__add-emoji').element.value).toBe('');
+    expect(wrapper.find('.category-tree__add-name').element.value).toBe('');
+  });
+
   it('ignores a second submit while the first category creation is still in flight', async () => {
     seed();
     let resolveCreate;

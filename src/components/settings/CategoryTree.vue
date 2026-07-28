@@ -1,13 +1,13 @@
 <template>
   <div class="category-tree">
-    <button type="button" class="category-tree__add-toggle" @click="addingOpen = !addingOpen">
+    <button type="button" class="category-tree__add-toggle" @click="toggleAddForm">
       {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
     </button>
 
     <form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
-      <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="4" />
+      <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="16" />
       <input v-model="newName" class="category-tree__add-name" placeholder="Название" />
-      <select v-model="newParentId" class="category-tree__add-parent">
+      <select v-model="newParentId" class="category-tree__add-parent" aria-label="Родительская категория">
         <option :value="null">Без родителя</option>
         <option v-for="row in rows" :key="row.category.id" :value="row.category.id">
           {{ '—'.repeat(row.depth) }} {{ row.category.name }}
@@ -126,6 +126,21 @@ export default {
       );
       if (confirmed) await this.categoriesStore.remove(category.id);
     },
+    // Shared by cancel and a successful submit — without this, tapping
+    // ‹ Отмена left the typed name/emoji/parent sitting in data(), so
+    // reopening the form (or a future edit-mode reuse of this same form)
+    // would resurface a stale, possibly-abandoned-mid-entry draft, the same
+    // "stale value on reopen" bug class already fixed once this session for
+    // ExpenseModal (commit 51b34d9).
+    resetAddForm() {
+      this.newName = '';
+      this.newEmoji = '';
+      this.newParentId = null;
+    },
+    toggleAddForm() {
+      this.addingOpen = !this.addingOpen;
+      if (!this.addingOpen) this.resetAddForm();
+    },
     async submitAdd() {
       if (this.submitting) return;
       const name = this.newName.trim();
@@ -140,10 +155,8 @@ export default {
           emoji: this.newEmoji.trim() || '📁',
           parentId: this.newParentId,
         });
-        this.newName = '';
-        this.newEmoji = '';
-        this.newParentId = null;
         this.addingOpen = false;
+        this.resetAddForm();
       } finally {
         this.submitting = false;
       }
@@ -178,6 +191,9 @@ export default {
   }
 
   &__add-emoji {
+    // Same 44px-touch-target reasoning as __add-toggle/__add-parent — a
+    // text input is still something a real finger has to tap into.
+    min-height: 44px;
     width: 44px;
     text-align: center;
     background: var(--surface-sunken);
@@ -186,6 +202,7 @@ export default {
   }
 
   &__add-name {
+    min-height: 44px;
     flex: 1;
     min-width: 100px;
     background: var(--surface-sunken);

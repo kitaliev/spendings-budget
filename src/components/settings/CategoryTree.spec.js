@@ -79,6 +79,34 @@ describe('CategoryTree', () => {
     await wrapper.find('.tree-row__action--delete').trigger('click');
     expect(categoriesDb.deleteCategory).toHaveBeenCalledWith('food');
   });
+
+  it('ignores a second archive call while the first is still in flight', async () => {
+    seed();
+    let resolveArchive;
+    categoriesDb.archiveCategory.mockReturnValue(new Promise((resolve) => { resolveArchive = resolve; }));
+    const wrapper = mount(CategoryTree);
+    wrapper.vm.archive('food');
+    wrapper.vm.archive('food');
+    resolveArchive(undefined);
+    categoriesDb.listCategories.mockResolvedValue([]);
+    await flushPromises();
+    expect(categoriesDb.archiveCategory).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a second delete call while the first is still in flight', async () => {
+    seed();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let resolveDelete;
+    categoriesDb.deleteCategory.mockReturnValue(new Promise((resolve) => { resolveDelete = resolve; }));
+    const wrapper = mount(CategoryTree);
+    const foodCategory = { id: 'food', name: 'Еда', emoji: '🍔', parentId: null, archived: false };
+    wrapper.vm.confirmDelete(foodCategory);
+    wrapper.vm.confirmDelete(foodCategory);
+    resolveDelete(undefined);
+    categoriesDb.listCategories.mockResolvedValue([]);
+    await flushPromises();
+    expect(categoriesDb.deleteCategory).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('CategoryTree — adding a category', () => {

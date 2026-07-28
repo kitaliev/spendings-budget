@@ -174,10 +174,16 @@ export default {
     // same pattern as MonthNav's arrows. Symmetric on all sides (unlike
     // MonthNav's) since nothing else shares this corner of TopBar for it to
     // encroach on.
+    //
+    // inset is one pixel more than the 5px the 34->44 gap alone would need:
+    // this element's own 1px border shrinks its padding box (the ::before's
+    // actual containing block per the CSS abs-pos spec) by 1px on every
+    // side, so an inset of -5px here only reaches 4px past the *visible*
+    // border edge — measured 42px live, not 44px, until compensated.
     &::before {
       content: '';
       position: absolute;
-      inset: -5px;
+      inset: -6px;
     }
   }
 

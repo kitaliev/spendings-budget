@@ -141,6 +141,17 @@ export default {
     }
   }
 
+  // No rule needed for layout today — as a direct child of the flex
+  // .debt-card__top it's auto-"blockified" into a flex item regardless of
+  // display, the same reason it and __amount stack side-by-side with no
+  // rule of its own. min-width: 0 given explicitly so a long debt name
+  // keeps wrapping/shrinking rather than forcing __amount off the row,
+  // since a bare flex item otherwise defaults to min-width: auto (its
+  // content's natural width, which for text can be wider than the row).
+  &__title {
+    min-width: 0;
+  }
+
   &__name {
     display: block;
     font-size: 15px;

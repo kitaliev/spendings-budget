@@ -38,6 +38,18 @@ describe('CategoryPie at the root level', () => {
     const funRow = wrapper.findAll('.category-pie__legend-item').find((r) => r.text().includes('Развлечения'));
     expect(funRow.find('.category-pie__amount').text()).toBe('2 000 ₽');
   });
+
+  it('shows a flat placeholder fill, not a misleading solid conic-gradient, when the month has zero spend', () => {
+    // Categories can exist (even just the seeded default) with zero spend
+    // that month — every gradient stop then sits at exactly 0%, which the
+    // browser renders as a solid fill in the last category's color, not an
+    // empty chart. The condition must key off actual spend, not category count.
+    useCategoriesStore().items = [{ id: 'food', name: 'Еда', emoji: '🍔', parentId: null, archived: false }];
+    useTransactionsStore().items = [];
+    const wrapper = mount(CategoryPie, { props: { monthKey: '2026-07' } });
+    expect(wrapper.find('.category-pie__chart').attributes('style')).toContain('var(--surface-raised)');
+    expect(wrapper.find('.category-pie__chart').attributes('style')).not.toContain('conic-gradient');
+  });
 });
 
 describe('CategoryPie drill-down', () => {

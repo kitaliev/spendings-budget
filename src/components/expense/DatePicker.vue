@@ -71,6 +71,14 @@ export default {
   margin-bottom: 14px;
 
   &__btn {
+    // min-height + flex-centering, not just padding — the same emergent-
+    // height gap already found and fixed on every other button this
+    // session, missed here since this is the first control below the
+    // amount display on the app's single most-used screen.
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     position: relative;
     flex: 1;
     text-align: center;

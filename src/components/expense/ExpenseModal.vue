@@ -252,6 +252,15 @@ export default {
     justify-content: center;
     font-size: 14px;
     color: var(--ink-secondary);
+
+    // Same emergent-height gap as every other small circular icon button
+    // this session — this is the dismiss control on the screen that opens
+    // on every single app launch, and was missed in every earlier pass.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
+    }
   }
 
   &__entry {

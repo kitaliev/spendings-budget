@@ -12,10 +12,14 @@
   // — both below the 4.5:1 WCAG AA minimum for normal text, and this token
   // is used at normal/small sizes for meaningful (non-decorative) text in
   // most components. Darkened within the same low-saturation grey (same
-  // hue/sat, just lower lightness) to clear AA against the harder of the
-  // two surfaces it's actually used on: 4.66:1 / 5.10:1.
-  --ink-muted: #696F72;
-  --accent: #A9762C;
+  // hue/sat, just lower lightness) to clear AA against every surface it's
+  // actually used on, including --surface-sunken (missed in an earlier
+  // pass, only 4.42:1): 4.80:1 / 5.25:1 / 4.55:1.
+  --ink-muted: #676D70;
+  // #A9762C under white --accent-ink text only reaches 3.95:1 — below AA.
+  // Darkened within the same hue/sat to 4.66:1. (Dark theme's pairing was
+  // already fine at 7.74:1, not touched.)
+  --accent: #9A6B28;
   --accent-strong: #8F621F;
   --accent-ink: #FFFFFF;
   --accent-wash: rgba(169, 118, 44, .10);
@@ -87,8 +91,8 @@
   --surface-sunken: #EDEFEE;
   --ink: #14191B;
   --ink-secondary: #52585B;
-  --ink-muted: #696F72; // same WCAG-AA fix as the light-theme block above
-  --accent: #A9762C;
+  --ink-muted: #676D70; // same WCAG-AA fix as the light-theme block above
+  --accent: #9A6B28; // same WCAG-AA fix as the light-theme block above
   --accent-strong: #8F621F;
   --accent-ink: #FFFFFF;
   --accent-wash: rgba(169, 118, 44, .10);

@@ -85,7 +85,13 @@ export default {
         const end = total ? (acc / total) * 100 : 0;
         return `${row.color} ${start}% ${end}%`;
       });
-      return stops.length ? `conic-gradient(${stops.join(', ')})` : 'var(--surface-raised)';
+      // stops.length (the category count) is almost always truthy — including
+      // on a brand-new install's default category, or any month with zero
+      // spend — which produced a conic-gradient where every stop sits at 0%,
+      // rendering as a solid, misleading fill (the browser extends the last
+      // stop's color across the whole circle) while the legend correctly
+      // showed 0% for everything. total is the actual condition that matters.
+      return total ? `conic-gradient(${stops.join(', ')})` : 'var(--surface-raised)';
     },
   },
   watch: {
@@ -176,6 +182,15 @@ export default {
     width: 10px;
     height: 10px;
     border-radius: 3px;
+    flex: 0 0 auto;
+  }
+
+  // The one sibling here with no rule of its own until now — fixed-size
+  // like __swatch, not flexible like __name, matching the same
+  // fixed/flexible split every other icon-then-label row in this app uses
+  // (e.g. CategoryTree's tree-row__emoji).
+  &__emoji {
+    font-size: 14px;
     flex: 0 0 auto;
   }
 

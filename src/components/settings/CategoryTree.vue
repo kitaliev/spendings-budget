@@ -90,8 +90,10 @@ export default {
       newName: '',
       newEmoji: '',
       newParentId: null,
-      // Same reasoning as every other submitting guard this session — neither
-      // the db layer nor the store rejects a second concurrent create() call.
+      // Shared across submitAdd/archive/confirmDelete (same shape as
+      // ExpenseModal sharing one flag between commit() and onDelete()) —
+      // neither the db layer nor the store rejects a second concurrent
+      // write call for any of them.
       submitting: false,
     };
   },
@@ -111,20 +113,39 @@ export default {
       this.revealedId = this.revealedId === id ? null : id;
     },
     async archive(id) {
+      // Reuses the same submitting flag as submitAdd — same shape as
+      // ExpenseModal sharing one submitting flag between commit() and
+      // onDelete(). Tapping Архив and immediately re-revealing the same
+      // row's actions (the panel becomes hit-testable again once :inert
+      // lifts after re-render) could otherwise fire a second concurrent
+      // archive/delete before the first resolves.
+      if (this.submitting) return;
       this.revealedId = null;
-      await this.categoriesStore.archive(id);
+      this.submitting = true;
+      try {
+        await this.categoriesStore.archive(id);
+      } finally {
+        this.submitting = false;
+      }
     },
     transactionCountFor(categoryId) {
       const ids = subtreeIds(this.categoriesStore.items, categoryId);
       return this.transactionsStore.items.filter((t) => ids.includes(t.categoryId)).length;
     },
     async confirmDelete(category) {
+      if (this.submitting) return;
       this.revealedId = null;
       const count = this.transactionCountFor(category.id);
       const confirmed = window.confirm(
         `Удалить «${category.name}» и все её транзакции (${count})? Это нельзя отменить.`
       );
-      if (confirmed) await this.categoriesStore.remove(category.id);
+      if (!confirmed) return;
+      this.submitting = true;
+      try {
+        await this.categoriesStore.remove(category.id);
+      } finally {
+        this.submitting = false;
+      }
     },
     // Shared by cancel and a successful submit — without this, tapping
     // ‹ Отмена left the typed name/emoji/parent sitting in data(), so

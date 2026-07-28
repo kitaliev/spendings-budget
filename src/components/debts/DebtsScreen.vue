@@ -144,10 +144,16 @@ export default {
     // gear (34px, already fixed) — this one is smaller (30px) and needs
     // even more expansion. Symmetric on all sides: nothing else shares
     // this corner of TopBar for it to encroach on.
+    //
+    // inset is one pixel more than the 7px the 30->44 gap alone would need:
+    // this element's own 1px border shrinks its padding box (the ::before's
+    // actual containing block per the CSS abs-pos spec) by 1px on every
+    // side, so an inset of -7px here only reaches 6px past the *visible*
+    // border edge — measured 42px live, not 44px, until compensated.
     &::before {
       content: '';
       position: absolute;
-      inset: -7px;
+      inset: -8px;
     }
   }
 

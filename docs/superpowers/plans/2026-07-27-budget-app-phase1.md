@@ -6581,7 +6581,7 @@ Append these `describe` blocks to the existing `src/components/debts/DebtsScreen
 
 ```js
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import DebtsScreen from './DebtsScreen.vue';
 import { useDebtsStore } from '../../stores/debts.js';
@@ -6590,7 +6590,7 @@ import * as debtsDb from '../../db/debts.js';
 vi.mock('../../db/debts.js');
 ```
 
-(This replaces the existing top-of-file imports — the only change is adding `vi` to the vitest import and the two new lines for `debtsDb` + `vi.mock`. The existing `beforeEach` that seeds `store.items`/`store.payments` directly stays exactly as-is below it.)
+(This replaces the existing top-of-file imports — the changes are adding `vi` to the vitest import, `flushPromises` to the test-utils import, and the two new lines for `debtsDb` + `vi.mock`. The existing `beforeEach` that seeds `store.items`/`store.payments` directly stays exactly as-is below it.)
 
 ```js
 describe('DebtsScreen — adding a debt', () => {
@@ -6646,6 +6646,29 @@ describe('DebtsScreen — adding a debt', () => {
     await wrapper.find('.debts-screen__add-form').trigger('submit');
     expect(wrapper.find('.debts-screen__add-form').exists()).toBe(false);
   });
+
+  it('reflects the add-form open/closed state via aria-expanded on the toggle', async () => {
+    const wrapper = mount(DebtsScreen);
+    const toggle = wrapper.find('.debts-screen__add-toggle');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+  });
+
+  it('ignores a second submit while the first debt creation is still in flight', async () => {
+    let resolveCreate;
+    debtsDb.createDebt.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(DebtsScreen);
+    await wrapper.find('.debts-screen__add-toggle').trigger('click');
+    await wrapper.find('.debts-screen__add-name').setValue('Олег');
+    await wrapper.find('.debts-screen__add-amount').setValue('500');
+    const form = wrapper.find('.debts-screen__add-form');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolveCreate({ id: 'd7', name: 'Олег', amount: 500, comment: '', direction: 'owed_to_me' });
+    await flushPromises();
+    expect(debtsDb.createDebt).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
@@ -6663,7 +6686,13 @@ Replace the `<template>` block with:
   <div class="debts-screen">
     <TopBar title="Долги">
       <template #right>
-        <button class="debts-screen__add-toggle" aria-label="Добавить долг" @click="addingOpen = !addingOpen">
+        <button
+          type="button"
+          class="debts-screen__add-toggle"
+          aria-label="Добавить долг"
+          :aria-expanded="addingOpen ? 'true' : 'false'"
+          @click="addingOpen = !addingOpen"
+        >
           {{ addingOpen ? '✕' : '+' }}
         </button>
       </template>
@@ -6721,6 +6750,9 @@ data() {
     newName: '',
     newAmount: '',
     newComment: '',
+    // Neither the db layer nor the store validates or guards against
+    // concurrent calls — same reasoning as DebtCard's submitPayment guard.
+    submitting: false,
     segments: [
       { value: 'owed_to_me', label: 'Мне должны' },
       { value: 'i_owe', label: 'Я должен' },
@@ -6733,19 +6765,35 @@ Add to `methods` (merge with the existing `formatMoney`):
 
 ```js
 async submitAdd() {
-  const amount = parseFloat(this.newAmount);
-  if (!this.newName.trim() || !amount || amount <= 0) return;
-  await this.debtsStore.create({
-    name: this.newName.trim(),
-    amount,
-    comment: this.newComment.trim(),
-    direction: this.direction,
-  });
-  this.newName = '';
-  this.newAmount = '';
-  this.newComment = '';
-  this.addingOpen = false;
+  if (this.submitting) return;
+  const name = this.newName.trim();
+  const amount = Math.round(parseFloat(this.newAmount));
+  if (!name || !(amount > 0)) {
+    useToastStore().show(!name ? 'Введите название' : 'Сумма должна быть больше нуля');
+    return;
+  }
+  this.submitting = true;
+  try {
+    await this.debtsStore.create({
+      name,
+      amount,
+      comment: this.newComment.trim(),
+      direction: this.direction,
+    });
+    this.newName = '';
+    this.newAmount = '';
+    this.newComment = '';
+    this.addingOpen = false;
+  } finally {
+    this.submitting = false;
+  }
 },
+```
+
+Add to the imports (merge with the existing ones):
+
+```js
+import { useToastStore } from '../../stores/toast.js';
 ```
 
 Add to the `<style lang="scss">` block:
@@ -6753,12 +6801,23 @@ Add to the `<style lang="scss">` block:
 ```scss
 .debts-screen {
   &__add-toggle {
+    position: relative;
     width: 30px;
     height: 30px;
     border-radius: 50%;
     background: var(--surface);
     border: 1px solid var(--border);
     font-size: 16px;
+
+    // Same emergent-height-style gap as BudgetDashboard's own settings
+    // gear (34px, already fixed) — this one is smaller (30px) and needs
+    // even more expansion. Symmetric on all sides: nothing else shares
+    // this corner of TopBar for it to encroach on.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -7px;
+    }
   }
 
   &__add-form {
@@ -6806,7 +6865,7 @@ Add to the `<style lang="scss">` block:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npm test -- src/components/debts/DebtsScreen.spec.js`
-Expected: PASS (14 tests total — 8 from Task 22 plus 6 new).
+Expected: PASS (16 tests total — 8 from Task 22 plus 8 new).
 
 - [ ] **Step 5: Commit**
 

@@ -6451,7 +6451,7 @@ git commit -m "feat: wire App shell — tabs, settings overlay, always-on-launch
 
 **Note added during code-quality review:** this was the first point every component and store got wired together at once, and that surfaced four issues invisible to any single component's own review — all reflected in the code above:
 
-- **Critical:** `.app-shell__content`/`.app-shell__tabs` stayed fully focusable and hit-testable while visually covered by the settings overlay (only `z-index` separated them) — the exact off-canvas focus-trap bug class already fixed once in `CategoryTree` (Task 23) via `inert`, recurring here because this is the one place a full-screen overlay stacks over live siblings. Fixed with `:inert="showSettings"` on both. Verified in real Chrome, not just happy-dom (this project's unit-test environment, which has no `inert` IDL property and would give a misleadingly stringified `inert="true"`/`"false"` attribute either way — real Chrome uses the actual boolean property and was independently confirmed to block both focus and `elementFromPoint` hit-testing while covered, and restore both once the overlay closes).
+- **Critical:** `.app-shell__content`/`.app-shell__tabs` stayed fully focusable and hit-testable while visually covered by the settings overlay (only `z-index` separated them) — the exact off-canvas focus-trap bug class already fixed once in `CategoryTree` (Task 23) via `inert`, recurring here because this is the one place a full-screen overlay stacks over live siblings. Fixed with `:inert="showSettings"` on both. Verified in real Chrome, not just happy-dom (this project's unit-test environment, which has no `inert` IDL property and would give a misleadingly stringified `inert="true"`/`"false"` attribute either way — real Chrome uses the actual boolean property and was independently confirmed to block both focus and `elementFromPoint` hit-testing while covered, and restore both once the overlay closes). **Further extended in Task 27's own review** to `:inert="showSettings || showExpenseModal"`, once `TransactionList` put a second kind of full-screen overlay (the expense modal) over the same content — see that task's note.
 - **Critical:** closing an abandoned add-session (typed amount, no category ever tapped) and reopening via the FAB left the stale amount on screen — see the note on Task 17 above; the fix lives in `ExpenseModal.vue`, not this file.
 - **Important:** no loading state while the four stores load in `created()` — the always-on-launch modal's category list was fully empty and the dashboard showed a misleadingly-confident "0 ₽" for the whole gap, worst on a cold IndexedDB. Fixed with the `ready` flag above, gating the dashboard/debts screens behind `.app-shell__loading`; the expense modal now only auto-opens once there's real data to enter against.
 - **Important:** no error handling around the `Promise.all` — a rejected store load left the app silently stuck. Fixed with try/catch/finally as shown above.
@@ -6845,6 +6845,30 @@ describe('TransactionList', () => {
     await wrapper.findAll('.transaction-list__row')[0].trigger('click');
     expect(wrapper.emitted('edit')[0][0]).toMatchObject({ id: 't2' });
   });
+
+  it('falls back to a placeholder emoji and label when a transaction has no matching category', () => {
+    useTransactionsStore().items = [
+      { id: 't4', date: '2026-07-10', amount: 300, categoryId: 'missing' },
+    ];
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    const row = wrapper.find('.transaction-list__row');
+    expect(row.text()).toContain('❓');
+    expect(row.text()).toContain('Без категории');
+  });
+
+  it('keeps a stable, defined order for same-day transactions instead of reversing them', () => {
+    // a.date < b.date ? 1 : -1 (the original comparator) claims a < b AND
+    // b < a for equal dates simultaneously — not a valid comparator, and
+    // proven to reverse equal-date runs rather than leave them stable.
+    useTransactionsStore().items = [
+      { id: 'a', date: '2026-07-15', amount: 100, categoryId: 'food' },
+      { id: 'b', date: '2026-07-15', amount: 200, categoryId: 'food' },
+      { id: 'c', date: '2026-07-15', amount: 300, categoryId: 'food' },
+    ];
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    const rows = wrapper.findAll('.transaction-list__row');
+    expect(rows.map((r) => r.find('.transaction-list__amount').text())).toEqual(['100 ₽', '200 ₽', '300 ₽']);
+  });
 });
 ```
 
@@ -6893,12 +6917,18 @@ export default {
     categoriesStore() {
       return useCategoriesStore();
     },
+    transactionsStore() {
+      return useTransactionsStore();
+    },
     rows() {
-      const transactionsStore = useTransactionsStore();
-      return transactionsStore.items
+      return this.transactionsStore.items
         .filter((t) => t.date.startsWith(this.monthKey))
-        .slice()
-        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        // a.date < b.date ? 1 : -1 is not a valid comparator (it claims
+        // a < b AND b < a for equal dates) — proven to actually reverse
+        // equal-date runs rather than leave them stable, and combined with
+        // the store's own storage-order-is-arbitrary-per-id behavior, same-
+        // day transactions came back in a different order on every reload.
+        .sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0))
         .map((transaction) => ({
           transaction,
           category: this.categoriesStore.byId(transaction.categoryId),
@@ -6974,7 +7004,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/budget/TransactionList.spec.js`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Add the failing test for Dashboard wiring to `src/components/budget/BudgetDashboard.spec.js`**
 
@@ -7076,6 +7106,8 @@ openEditModal(transaction) {
 Run: `npm test -- src/App.spec.js`
 Expected: PASS (13 tests total — 11 already in this file as of Task 25's code-quality-review fixes plus 2 new; check the actual current file's test count first, do not assume 6 — Task 25's own review added several tests beyond its original draft).
 
+**Note added during code-quality review:** once `TransactionList` was actually wired in, a real interaction gap surfaced — `.app-shell__content`/`.app-shell__tabs`'s `:inert` binding (added in Task 25 to contain focus while the settings overlay is open) only accounted for `showSettings`, never `showExpenseModal`. With `TransactionList`'s rows now sitting behind that same `.app-shell__content` div, a keyboard/AT user could Tab into a background row while the always-on-launch expense modal was covering it, and silently swap the in-progress edit — discarding an unsaved typed amount with zero warning. Fixed by extending both bindings to `:inert="showSettings || showExpenseModal"`. This required updating the existing "makes the covered dashboard/tabs inert..." test in `App.spec.js` (it now closes the expense modal first, since `showExpenseModal` starts `true` and would otherwise make the "not inert" baseline assertion fail) and adding one new test for the modal-driven case specifically. Verified via mutation testing (reverting the binding fails the new test) and live in a real browser (the `.inert` property flips correctly across open→close→reopen). Test count after this fix: **14** (not 13).
+
 - [ ] **Step 13: Run the full test suite one more time**
 
 Run: `npm test`
@@ -7087,6 +7119,16 @@ Expected: every spec file passes.
 git add src/components/budget/TransactionList.vue src/components/budget/TransactionList.spec.js src/components/budget/BudgetDashboard.vue src/components/budget/BudgetDashboard.spec.js src/App.vue src/App.spec.js
 git commit -m "feat: add transaction list as the edit entry point"
 ```
+
+**Note added during spec-compliance review:** two test-coverage gaps were found and closed in a follow-up commit — `App.vue`'s `openEditModal` setting `showExpenseModal = true` was untested (masked by `created()`'s always-on-launch behavior already leaving the modal open by the time the test ran; fixed by closing the modal first in that test, so the assertion can only pass if `openEditModal` itself reopens it), and `TransactionList`'s "Без категории" fallback text was untested (no fixture ever used a non-matching `categoryId`; fixed by adding one).
+
+**Note added during code-quality review:** two Important issues were found and fixed, both reflected in the code above:
+- The sort comparator (`a.date < b.date ? 1 : -1`) isn't a valid comparator — it claims `a < b` and `b < a` simultaneously for equal dates, and was proven (via a direct Node repro) to actually reverse same-day transaction runs rather than leave them stable, on top of the store's own storage order already being arbitrary per-id. Fixed with a proper three-way comparator. A redundant `.slice()` was also removed and `transactionsStore` promoted to a computed, matching `categoriesStore`'s own shape in the same file.
+- `.app-shell__content`/`.app-shell__tabs`'s `:inert` binding (Task 25) only accounted for `showSettings`, never `showExpenseModal` — see the note added to Task 25 above. Fixed by extending both bindings; this is the fix now reflected in Task 25's own code block.
+
+Both fixes verified via mutation testing (each fails its own test when reverted) and the inert fix additionally confirmed live in a real browser.
+
+**Deferred to the final whole-implementation review, not fixed here:** `--ink-muted` fails WCAG AA contrast (3.25:1 light / 3.93:1 dark, both against `--ground`) at the sizes used in `TransactionList`'s title/empty-state/date text — confirmed to be the same systemic, codebase-wide token issue already flagged during Task 24's review (used at small sizes in at least 15 files across this whole implementation). Worth a single cross-cutting fix to `_tokens.scss` (darken the token, or reclassify muted-but-meaningful text to `--ink-secondary`, which already clears AA) rather than a per-file patch.
 
 ---
 

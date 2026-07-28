@@ -1,11 +1,14 @@
 <template>
   <div id="app-shell" class="app-shell">
-    <div class="app-shell__content">
-      <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
-      <DebtsScreen v-else />
+    <div class="app-shell__content" :inert="showSettings">
+      <template v-if="ready">
+        <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
+        <DebtsScreen v-else />
+      </template>
+      <p v-else class="app-shell__loading">Загрузка…</p>
     </div>
 
-    <div class="app-shell__tabs">
+    <div class="app-shell__tabs" :inert="showSettings">
       <Toast :message="toastStore.message" />
       <TabBar :active-tab="activeTab" @update:active-tab="activeTab = $event" @add-expense="openAddModal" />
     </div>
@@ -41,9 +44,16 @@ export default {
   components: { BudgetDashboard, DebtsScreen, SettingsScreen, ExpenseModal, TabBar, Toast },
   data() {
     return {
+      // Every store read on screen (dashboard figures, category list, debts)
+      // is empty until created()'s Promise.all below resolves — rendering
+      // the real screens before then shows a misleadingly-confident "0 ₽"
+      // and an empty, non-functional category picker in the always-on-launch
+      // modal, worst on exactly the cold-IndexedDB case that matters most
+      // for a first impression.
+      ready: false,
       activeTab: 'budget',
       showSettings: false,
-      showExpenseModal: true, // greets the user on every launch
+      showExpenseModal: false, // flips true once ready, see created() below
       editingTransaction: null,
     };
   },
@@ -53,12 +63,24 @@ export default {
     },
   },
   async created() {
-    await Promise.all([
-      useCategoriesStore().load(),
-      useBudgetRatesStore().load(),
-      useTransactionsStore().load(),
-      useDebtsStore().load(),
-    ]);
+    try {
+      await Promise.all([
+        useCategoriesStore().load(),
+        useBudgetRatesStore().load(),
+        useTransactionsStore().load(),
+        useDebtsStore().load(),
+      ]);
+      this.showExpenseModal = true; // greets the user on every launch, once there's real data to enter against
+    } catch (err) {
+      // Nothing else in this app has a retry affordance for a failed initial
+      // load (quota exceeded, IndexedDB blocked in private mode, etc.) — a
+      // toast at least tells the user why the screen came up empty, rather
+      // than leaving them to guess. `ready` still flips in `finally` so the
+      // app isn't stuck on the loading screen forever.
+      useToastStore().show('Не удалось загрузить данные. Перезапустите приложение.');
+    } finally {
+      this.ready = true;
+    }
   },
   methods: {
     openAddModal() {
@@ -92,6 +114,13 @@ export default {
     position: relative;
     overflow-y: auto;
     min-height: 0; // lets this child actually shrink/scroll instead of stretching .app-shell
+  }
+
+  &__loading {
+    padding: 40px 18px;
+    text-align: center;
+    color: var(--ink-muted);
+    font-size: 14px;
   }
 
   &__tabs {

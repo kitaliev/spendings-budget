@@ -72,6 +72,20 @@ export default {
         }
       },
     },
+    // Covers the one case the watcher above can't: App.vue keeps a single
+    // persistent instance and closing an add-session sets editingTransaction
+    // to null when it was already null, so that watcher never re-fires.
+    // Without this, closing the sheet on an abandoned, uncommitted amount
+    // (typed but no category ever tapped) and reopening via the FAB would
+    // resurface the stale amount/date/drill-down with zero warning — a real
+    // risk of recording a wrong transaction in a money-tracking app.
+    visible(isVisible) {
+      if (isVisible && !this.editingTransaction) {
+        this.raw = '';
+        this.date = todayKey();
+        this.$refs.picker?.reset();
+      }
+    },
   },
   methods: {
     onKey(key) {

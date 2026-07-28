@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from 'pinia';
 import ExpenseModal from './ExpenseModal.vue';
 import { useCategoriesStore } from '../../stores/categories.js';
 import * as transactionsDb from '../../db/transactions.js';
+import { todayKey } from '../../utils/date.js';
 
 vi.mock('../../db/transactions.js');
 
@@ -169,6 +170,23 @@ describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent 
     resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
     await commitPromise;
     expect(wrapper.vm.date).toBe('2026-07-26');
+  });
+
+  it('clears an abandoned, uncommitted amount when reopened for a new add-session, even though editingTransaction stays null on both sides', async () => {
+    // App.vue keeps a single persistent instance and resets editingTransaction
+    // to null on every close — but it was already null for an add-session, so
+    // the editingTransaction watcher never re-fires on that unchanged value.
+    // Only the visible prop actually transitions on a close-then-FAB-reopen
+    // cycle, which is what the fix under test reacts to instead.
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5');
+
+    await wrapper.setProps({ visible: false }); // closed without picking a category
+    await wrapper.setProps({ visible: true }); // reopened via the FAB
+
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0');
+    expect(wrapper.vm.date).toBe(todayKey());
   });
 });
 

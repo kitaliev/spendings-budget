@@ -7459,3 +7459,23 @@ git commit -m "feat: add debt creation form"
 ```
 
 ---
+
+## Final whole-implementation review
+
+All 28 tasks above are implemented, individually reviewed (spec-compliance then code-quality, per `superpowers:subagent-driven-development`), and committed. Before finishing the branch, one more review pass looked at the assembled whole — not any single task in isolation — against the original design spec (`docs/superpowers/specs/2026-07-27-budget-app-design.md`) and this plan.
+
+**Confirmed working end-to-end** (driven live, not just read): both product gaps this plan itself flagged after Task 25's self-review (no way to create a category, no way to reach an existing transaction) are genuinely closed by Tasks 26/27 — created a category through Settings, had it survive a reload; edited and deleted a transaction through the new `TransactionList`, watched the dashboard/pie chart/hero figure update correctly. Debt/budget independence holds (recording a payment never touches the Бюджет tab's figures). IndexedDB persistence across reload confirmed (spec §3's core promise). Every stack convention (Options API only, no TS, no Tailwind, no `scoped` styles, no server calls) holds across the whole tree, not spot-checked.
+
+**Five Important issues found and fixed** (commit `14085fc`), all invisible to any single task's own review because they only became apparent once the whole app was driven together or looked at token-by-token across every consumer:
+
+1. `ExpenseModal`'s close button (Task 17) — the dismiss control on the screen that opens on every single launch — had no hit-slop, measuring 28px. Fixed with the same `::before` pattern used everywhere else, missed here because this file's own review predated that pattern becoming standard.
+2. `DatePicker`'s three date pills (Task 16) measured 35px with no `min-height` — the first interactive control below the amount display on the app's single most-used screen. Fixed.
+3. `CategoryPie`'s chart (Task 19) rendered a solid, misleading fill instead of an empty placeholder whenever the viewed month has zero spend — including on every fresh install, since the fallback checked category count (`stops.length`, almost always truthy) instead of actual spend (`total`, the correct and already-computed condition one line above). Fixed; added a regression test.
+4. `--accent` under `--accent-ink` (`_tokens.scss`, foundational to Task 2) failed WCAG AA in light theme (3.95:1) for every primary CTA button app-wide — never checked with the real contrast formula, unlike `--ink-muted`'s dedicated fix in this same final pass. Darkened using the identical real-luminance methodology. `--ink-muted` itself was also re-tuned slightly further, since its own fix (during Task 24's review) only checked two of the three surfaces it's actually used against and left a residual gap on `--surface-sunken`.
+5. `CategoryTree`'s `archive()`/`confirmDelete()` (Task 23) were the only write-triggering handlers in the whole app left without the `submitting` guard every sibling handler has, including this same file's own `submitAdd`. Fixed, sharing one flag across all three (same shape as `ExpenseModal` sharing one flag between `commit()` and `onDelete()`).
+
+**Two Minor issues fixed alongside them:** two hit-slop buttons (`BudgetDashboard`'s settings gear, `DebtsScreen`'s add-toggle) undershot 44px by 2px — their own 1px border shrinks the padding box that an absolutely-positioned `::before`'s `inset` is computed against (a real CSS technicality, not a typo), compensated by bumping each inset 1px. Five template classes had no matching style rule anywhere (the exact "orphaned class" pattern that shipped three separate times earlier this session, under variations of a bare `.section-title`) — confirmed all five were currently benign (saved by flex-item auto-blockification or plain block-default behavior), but three of them (`TopBar`'s `__left`/`__right`, `DebtCard`'s `__title`, `CategoryPie`'s `__emoji`) genuinely depend on that auto-blockification and got minimal explicit rules for robustness; the other two (`CategoryPie`'s `__legend`, `DebtsScreen`'s `closed-list`) are plain block wrappers with block children that need no explicit rule at all and were left alone.
+
+All five Important and both Minor fixes were verified via mutation testing (each fails its own test when reverted) and empirically in a real browser (exact pixel/contrast measurements, not estimated) by a second, independent review pass before the branch was finished. Full suite after this final round: **32 files, 242 tests, all passing.**
+
+---

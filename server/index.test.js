@@ -77,3 +77,74 @@ describe('server API — login and status', () => {
     assert.equal(stillUp.status, 200); // proves the server process is still alive, not just this one request
   });
 });
+
+describe('server API — sync and restore', () => {
+  const testDbPath = './test-server-db2.sqlite';
+  const testHashPath = './test-server-password2.hash';
+  const testBackupDir = './test-server-backups2';
+  let server, baseUrl, db;
+
+  before(async () => {
+    for (const p of [testDbPath, testHashPath]) if (fs.existsSync(p)) fs.unlinkSync(p);
+    db = openDatabase(testDbPath);
+    const app = createApp(db, { hashPath: testHashPath, dbPath: testDbPath, backupDir: testBackupDir });
+    server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, resolve));
+    baseUrl = `http://localhost:${server.address().port}`;
+  });
+
+  after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+    for (const p of [testDbPath, testHashPath]) if (fs.existsSync(p)) fs.unlinkSync(p);
+    fs.rmSync(testBackupDir, { recursive: true, force: true });
+  });
+
+  test('POST /api/sync is rejected without a valid session', async () => {
+    const res = await fetch(`${baseUrl}/api/sync`, { method: 'POST', body: JSON.stringify({}) });
+    assert.equal(res.status, 401);
+  });
+
+  test('GET /api/restore is rejected without a valid session', async () => {
+    const res = await fetch(`${baseUrl}/api/restore`);
+    assert.equal(res.status, 401);
+  });
+
+  test('a logged-in caller can sync a snapshot, then restore the same data back', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      body: JSON.stringify({ password: 'hunter2' }),
+    });
+    const cookie = loginRes.headers.get('set-cookie');
+
+    const snapshot = {
+      categories: [{ id: 'c1', name: 'Еда', emoji: '🍔', parentId: null, archived: false }],
+      transactions: [{ id: 't1', amount: 500, date: '2026-07-01', categoryId: 'c1' }],
+      budgetRates: [{ id: 'r1', amount: 2500, effectiveFrom: '2026-01-01' }],
+      debts: [],
+      debtPayments: [],
+    };
+    const syncRes = await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify(snapshot),
+    });
+    assert.equal(syncRes.status, 200);
+
+    const restoreRes = await fetch(`${baseUrl}/api/restore`, { headers: { cookie } });
+    assert.deepEqual(await restoreRes.json(), snapshot);
+  });
+
+  test('syncing rotates a backup of whatever was there before', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      body: JSON.stringify({ password: 'hunter2' }),
+    });
+    const cookie = loginRes.headers.get('set-cookie');
+    const empty = { categories: [], transactions: [], budgetRates: [], debts: [], debtPayments: [] };
+    await fetch(`${baseUrl}/api/sync`, { method: 'POST', headers: { cookie }, body: JSON.stringify(empty) });
+    await fetch(`${baseUrl}/api/sync`, { method: 'POST', headers: { cookie }, body: JSON.stringify(empty) });
+    assert.ok(fs.existsSync(testBackupDir), 'a second sync should have rotated a backup of the db the first sync left behind');
+    assert.ok(fs.readdirSync(testBackupDir).length >= 1);
+  });
+});

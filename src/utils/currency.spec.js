@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatMoney } from './currency.js';
+import { formatMoney, parsePositiveAmount } from './currency.js';
 
 describe('formatMoney', () => {
   it('groups thousands with a space and appends the ruble sign', () => {
@@ -20,5 +20,25 @@ describe('formatMoney', () => {
 
   it('does not render "−0 ₽" for a negative amount that rounds to zero', () => {
     expect(formatMoney(-0.4)).toBe('0 ₽');
+  });
+});
+
+describe('parsePositiveAmount', () => {
+  it('parses and rounds a valid amount string', () => {
+    expect(parsePositiveAmount('2000')).toBe(2000);
+    expect(parsePositiveAmount('999.6')).toBe(1000);
+  });
+
+  it('returns null for empty or non-numeric input, not NaN', () => {
+    expect(parsePositiveAmount('')).toBeNull();
+    expect(parsePositiveAmount('abc')).toBeNull();
+  });
+
+  it('returns null for zero', () => {
+    expect(parsePositiveAmount('0')).toBeNull();
+  });
+
+  it('returns null for a negative amount', () => {
+    expect(parsePositiveAmount('-500')).toBeNull();
   });
 });

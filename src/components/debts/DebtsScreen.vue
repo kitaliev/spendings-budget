@@ -16,7 +16,7 @@
 
     <form v-if="addingOpen" class="debts-screen__add-form" @submit.prevent="submitAdd">
       <input v-model="newName" class="debts-screen__add-name" placeholder="Название" />
-      <input v-model="newAmount" type="number" inputmode="decimal" class="debts-screen__add-amount" placeholder="Сумма" />
+      <input v-model="newAmount" type="number" inputmode="decimal" min="1" step="1" class="debts-screen__add-amount" placeholder="Сумма" />
       <input v-model="newComment" class="debts-screen__add-comment" placeholder="Комментарий (необязательно)" />
       <button type="submit" class="debts-screen__add-submit">Добавить</button>
     </form>
@@ -59,7 +59,7 @@ import TopBar from '../layout/TopBar.vue';
 import DebtCard from './DebtCard.vue';
 import { useDebtsStore } from '../../stores/debts.js';
 import { useToastStore } from '../../stores/toast.js';
-import { formatMoney } from '../../utils/currency.js';
+import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 
 export default {
   name: 'DebtsScreen',
@@ -97,8 +97,8 @@ export default {
     async submitAdd() {
       if (this.submitting) return;
       const name = this.newName.trim();
-      const amount = Math.round(parseFloat(this.newAmount));
-      if (!name || !(amount > 0)) {
+      const amount = parsePositiveAmount(this.newAmount);
+      if (!name || !amount) {
         useToastStore().show(!name ? 'Введите название' : 'Сумма должна быть больше нуля');
         return;
       }
@@ -166,6 +166,17 @@ export default {
   &__add-amount {
     flex: 1;
     min-width: 80px;
+    // Hide the native up/down stepper — DebtCard's own pay-input already
+    // established this as an app-wide rule (every numeric-ish input is
+    // either fully custom or visually hidden; a bare spinner would be the
+    // one unstyled system control left in the UI).
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
   }
 
   &__add-comment {
@@ -182,6 +193,15 @@ export default {
   }
 
   &__add-submit {
+    // Same emergent-height gap as .segmented__opt/.closed-toggle in this
+    // same file (measured ~36px in a real browser with just 10px padding
+    // and a 13.5px line) — caught during Task 28's whole-feature sanity
+    // check, since it's the one button in this file that didn't get this
+    // fix in its own original pass.
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: 1 1 100%;
     padding: 10px;
     border-radius: 11px;

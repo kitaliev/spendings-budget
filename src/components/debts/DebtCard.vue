@@ -38,7 +38,7 @@
 <script>
 import { useDebtsStore } from '../../stores/debts.js';
 import { useToastStore } from '../../stores/toast.js';
-import { formatMoney } from '../../utils/currency.js';
+import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 import { todayKey, shortDate } from '../../utils/date.js';
 
 export default {
@@ -88,11 +88,10 @@ export default {
       // A native number input still allows a leading "-" regardless of
       // inputmode/min/step (those are soft UI hints, not enforcement —
       // @submit.prevent also skips native constraint-validation blocking).
-      // !(amount > 0) rejects NaN (empty/invalid text), zero, and negative
-      // values uniformly — a plain `amount <= 0` check would let NaN
-      // through, since every comparison against NaN is false.
-      const amount = Math.round(parseFloat(this.payAmount));
-      if (!(amount > 0)) {
+      // parsePositiveAmount rejects NaN (empty/invalid text), zero, and
+      // negative values uniformly, returning null for all three.
+      const amount = parsePositiveAmount(this.payAmount);
+      if (!amount) {
         useToastStore().show('Сумма должна быть больше нуля');
         return;
       }
@@ -225,6 +224,14 @@ export default {
   }
 
   &__pay-btn {
+    // Same emergent-height gap as .debt-card__top above (measured ~36px in
+    // a real browser with just 10px vertical padding and a 13.5px line) —
+    // this one was missed in that same fix pass despite being described as
+    // covered; caught later during Task 28's whole-feature sanity check.
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 10px 16px;
     border-radius: 11px;
     background: var(--accent);

@@ -35,12 +35,18 @@ export default {
     categoriesStore() {
       return useCategoriesStore();
     },
+    transactionsStore() {
+      return useTransactionsStore();
+    },
     rows() {
-      const transactionsStore = useTransactionsStore();
-      return transactionsStore.items
+      return this.transactionsStore.items
         .filter((t) => t.date.startsWith(this.monthKey))
-        .slice()
-        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        // a.date < b.date ? 1 : -1 is not a valid comparator (it claims
+        // a < b AND b < a for equal dates) — proven to actually reverse
+        // equal-date runs rather than leave them stable, and combined with
+        // the store's own storage-order-is-arbitrary-per-id behavior, same-
+        // day transactions came back in a different order on every reload.
+        .sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : 0))
         .map((transaction) => ({
           transaction,
           category: this.categoriesStore.byId(transaction.categoryId),

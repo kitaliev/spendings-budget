@@ -1,6 +1,11 @@
 <template>
   <div id="app-shell" class="app-shell">
-    <div class="app-shell__content" :inert="showSettings">
+    <!-- showExpenseModal must count here too, not just showSettings — with
+         TransactionList (rows behind this same content div) a keyboard/AT
+         user could otherwise Tab into a background row while the modal is
+         open and silently switch its editingTransaction, discarding
+         whatever unsaved amount was typed, with zero warning. -->
+    <div class="app-shell__content" :inert="showSettings || showExpenseModal">
       <template v-if="ready">
         <BudgetDashboard
           v-if="activeTab === 'budget'"
@@ -12,7 +17,7 @@
       <p v-else class="app-shell__loading">Загрузка…</p>
     </div>
 
-    <div class="app-shell__tabs" :inert="showSettings">
+    <div class="app-shell__tabs" :inert="showSettings || showExpenseModal">
       <Toast :message="toastStore.message" />
       <TabBar :active-tab="activeTab" @update:active-tab="activeTab = $event" @add-expense="openAddModal" />
     </div>

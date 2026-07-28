@@ -49,4 +49,18 @@ describe('TransactionList', () => {
     expect(row.text()).toContain('❓');
     expect(row.text()).toContain('Без категории');
   });
+
+  it('keeps a stable, defined order for same-day transactions instead of reversing them', () => {
+    // a.date < b.date ? 1 : -1 (the original comparator) claims a < b AND
+    // b < a for equal dates simultaneously — not a valid comparator, and
+    // proven to reverse equal-date runs rather than leave them stable.
+    useTransactionsStore().items = [
+      { id: 'a', date: '2026-07-15', amount: 100, categoryId: 'food' },
+      { id: 'b', date: '2026-07-15', amount: 200, categoryId: 'food' },
+      { id: 'c', date: '2026-07-15', amount: 300, categoryId: 'food' },
+    ];
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    const rows = wrapper.findAll('.transaction-list__row');
+    expect(rows.map((r) => r.find('.transaction-list__amount').text())).toEqual(['100 ₽', '200 ₽', '300 ₽']);
+  });
 });

@@ -149,6 +149,10 @@ describe('App navigation', () => {
     // expression itself against regressing.
     const wrapper = mount(App);
     await flushPromises();
+    // The always-on-launch expense modal is itself an inert-triggering
+    // overlay now (see the next test) — close it first so this test's
+    // baseline genuinely has nothing covering the dashboard/tabs.
+    await wrapper.findComponent({ name: 'ExpenseModal' }).vm.$emit('close');
     expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('false');
     expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('false');
 
@@ -161,6 +165,24 @@ describe('App navigation', () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('false');
     expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('false');
+  });
+
+  it('also makes the dashboard/tabs inert while the expense modal is open, so a background TransactionList row cannot be reached and silently swap the in-progress edit', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    // showExpenseModal starts true (the always-on-launch modal) — assert
+    // that alone already makes the background inert, then confirm closing
+    // it clears that, independently of the settings-overlay condition.
+    expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('true');
+    expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('true');
+
+    await wrapper.findComponent({ name: 'ExpenseModal' }).vm.$emit('close');
+    expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('false');
+    expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('false');
+
+    await wrapper.findComponent({ name: 'TabBar' }).vm.$emit('add-expense');
+    expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('true');
+    expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('true');
   });
 });
 

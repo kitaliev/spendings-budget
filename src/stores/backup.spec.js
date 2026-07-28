@@ -92,6 +92,45 @@ describe('backup store', () => {
     expect(freshStore.lastSyncAt).not.toBeNull();
   });
 
+  it('coalesces overlapping sync calls into exactly one queued follow-up, not one per call', async () => {
+    let resolveFirst;
+    backupApi.sync.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+    backupApi.sync.mockResolvedValue(undefined); // the coalesced follow-up resolves immediately
+
+    const store = useBackupStore();
+    const first = store.sync();
+    const second = store.sync(); // fired while the first is still in flight — must queue, not post a second request
+    const third = store.sync(); // already queued — must not turn into a second queued follow-up
+
+    // Nothing but the original request has actually gone out yet: overlapping
+    // calls must not produce overlapping in-flight requests.
+    expect(backupApi.sync).toHaveBeenCalledTimes(1);
+
+    resolveFirst();
+    await Promise.all([first, second, third]);
+
+    // Exactly one queued follow-up ran once the first settled — not one per
+    // overlapping call — and it still recorded status correctly, proving the
+    // queued write wasn't silently dropped.
+    expect(backupApi.sync).toHaveBeenCalledTimes(2);
+    expect(store.lastSyncOk).toBe(true);
+    expect(store.lastSyncAt).not.toBeNull();
+    expect(store.syncInFlight).toBe(false);
+    expect(store.syncQueued).toBe(false);
+  });
+
+  it('a single sync call with nothing queued behind it fires exactly one request, same as before', async () => {
+    backupApi.sync.mockResolvedValue(undefined);
+    const store = useBackupStore();
+
+    await store.sync();
+
+    expect(backupApi.sync).toHaveBeenCalledTimes(1);
+    expect(store.lastSyncOk).toBe(true);
+    expect(store.syncInFlight).toBe(false);
+    expect(store.syncQueued).toBe(false);
+  });
+
   it('restore pulls the snapshot, writes it locally, then reloads every store', async () => {
     const snapshot = { categories: [], transactions: [], budgetRates: [], debts: [], debtPayments: [] };
     backupApi.restore.mockResolvedValue(snapshot);

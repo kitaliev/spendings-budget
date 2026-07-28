@@ -32,6 +32,8 @@ export const useBackupStore = defineStore('backup', {
     loggedIn: null, // null = not yet checked this session
     ...loadPersistedStatus(),
     submitting: false,
+    syncInFlight: false,
+    syncQueued: false,
   }),
   actions: {
     async checkStatus() {
@@ -53,7 +55,36 @@ export const useBackupStore = defineStore('backup', {
     // write via syncPlugin.js, never throws and never surfaces an error
     // directly — the Settings screen's own status line is the only place a
     // failure becomes visible.
+    //
+    // Also serializes every call from this client. Without this, a rapid
+    // sequence of writes (each auto-triggering syncPlugin.js) would fire
+    // overlapping, un-awaited sync requests — the server's /api/sync does
+    // an unconditional overwrite on every call, so whichever request's
+    // body finishes parsing last wins, not necessarily the one reflecting
+    // the most recent local write. If a sync is already running, this call
+    // just flags that one more sync is needed once the current one
+    // finishes, instead of firing a second concurrent request that could
+    // complete out of order.
     async sync() {
+      if (this.syncInFlight) {
+        this.syncQueued = true;
+        return;
+      }
+      this.syncInFlight = true;
+      try {
+        await this._performSync();
+        while (this.syncQueued) {
+          this.syncQueued = false;
+          await this._performSync();
+        }
+      } finally {
+        this.syncInFlight = false;
+      }
+    },
+    // The actual network round-trip + status bookkeeping — split out of
+    // sync() so the coalescing loop above can run it more than once (the
+    // queued "one more sync" case) without duplicating this logic.
+    async _performSync() {
       try {
         await backupApi.sync({
           categories: useCategoriesStore().items,

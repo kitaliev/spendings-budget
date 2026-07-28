@@ -7,6 +7,10 @@ import { useBudgetRatesStore } from './budgetRates.js';
 import { useDebtsStore } from './debts.js';
 import * as backupApi from '../api/backup.js';
 import { restoreAllFromSnapshot } from '../db/restore.js';
+import * as categoriesDb from '../db/categories.js';
+import * as transactionsDb from '../db/transactions.js';
+import * as ratesDb from '../db/budgetRates.js';
+import * as debtsDb from '../db/debts.js';
 
 vi.mock('../api/backup.js');
 vi.mock('../db/restore.js');
@@ -39,6 +43,13 @@ describe('backup store', () => {
     await Promise.all([first, second]);
     expect(backupApi.login).toHaveBeenCalledTimes(1);
     expect(store.loggedIn).toBe(true);
+  });
+
+  it('resets submitting after a failed login, so a retry is possible', async () => {
+    backupApi.login.mockRejectedValue(new Error('Неверный пароль'));
+    const store = useBackupStore();
+    await expect(store.login('wrong')).rejects.toThrow('Неверный пароль');
+    expect(store.submitting).toBe(false);
   });
 
   it('sync gathers a snapshot from every store and posts it, recording success', async () => {
@@ -88,5 +99,10 @@ describe('backup store', () => {
     await useBackupStore().restore();
 
     expect(restoreAllFromSnapshot).toHaveBeenCalledWith(snapshot);
+    expect(categoriesDb.listCategories).toHaveBeenCalled();
+    expect(transactionsDb.listTransactions).toHaveBeenCalled();
+    expect(ratesDb.listRates).toHaveBeenCalled();
+    expect(debtsDb.listDebts).toHaveBeenCalled();
+    expect(debtsDb.listAllPayments).toHaveBeenCalled();
   });
 });

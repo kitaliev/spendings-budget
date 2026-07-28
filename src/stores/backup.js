@@ -67,11 +67,26 @@ export const useBackupStore = defineStore('backup', {
         this.lastSyncOk = false;
       }
       this.lastSyncAt = new Date().toISOString();
-      persistStatus({ lastSyncAt: this.lastSyncAt, lastSyncOk: this.lastSyncOk });
+      try {
+        persistStatus({ lastSyncAt: this.lastSyncAt, lastSyncOk: this.lastSyncOk });
+      } catch {
+        // localStorage can throw (quota exceeded, Safari private browsing with
+        // zero quota) — sync() must never throw regardless (decision #6), so a
+        // failed persist just means the status won't survive a reload; the
+        // in-memory lastSyncAt/lastSyncOk are still correct for this session.
+      }
     },
     async restore() {
       const snapshot = await backupApi.restore();
       await restoreAllFromSnapshot(snapshot);
+      // Known limitation, not fixed here: categoriesStore.load() and
+      // budgetRatesStore.load() each call their own seedDefaultCategoryIfEmpty()/
+      // seedDefaultRateIfEmpty() before listing — reused as-is since this task's
+      // scope is the backup store, not those files. This means restoring a
+      // genuinely-all-categories-deleted backup (reachable through ordinary,
+      // already-shipped Phase 1 UI — CategoryTree's delete flow has no
+      // don't-delete-the-last-one guard) will silently reseed a default
+      // category that wasn't part of what was actually backed up.
       await Promise.all([
         useCategoriesStore().load(),
         useTransactionsStore().load(),

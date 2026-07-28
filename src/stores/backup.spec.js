@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useBackupStore } from './backup.js';
 import { useCategoriesStore } from './categories.js';
+import * as categoriesModule from './categories.js'; // namespace import so a single test below can spyOn its named export
 import { useTransactionsStore } from './transactions.js';
 import { useBudgetRatesStore } from './budgetRates.js';
 import { useDebtsStore } from './debts.js';
@@ -82,6 +83,27 @@ describe('backup store', () => {
     expect(store.lastSyncAt).not.toBeNull();
   });
 
+  it('sync never rejects even if gathering the snapshot itself throws synchronously', async () => {
+    const store = useBackupStore();
+    // Makes the categories half of the snapshot-gathering object literal throw
+    // synchronously, before backupApi.sync is ever called — this is a
+    // different failure mode than the network-rejection test above (it
+    // happens while *building* the request, not while awaiting it), and nothing
+    // previously proved the try/catch in _performSync is scoped widely enough
+    // to also catch this.
+    const brokenAccessor = vi.spyOn(categoriesModule, 'useCategoriesStore').mockImplementation(() => {
+      throw new Error('boom');
+    });
+
+    try {
+      await expect(store.sync()).resolves.toBeUndefined();
+      expect(store.lastSyncOk).toBe(false);
+      expect(store.syncInFlight).toBe(false); // confirms the store isn't left wedged either
+    } finally {
+      brokenAccessor.mockRestore(); // must not leak a throwing useCategoriesStore into later tests
+    }
+  });
+
   it('sync status persists to localStorage and survives a fresh store instance', async () => {
     backupApi.sync.mockResolvedValue(undefined);
     await useBackupStore().sync();
@@ -115,6 +137,47 @@ describe('backup store', () => {
     expect(backupApi.sync).toHaveBeenCalledTimes(2);
     expect(store.lastSyncOk).toBe(true);
     expect(store.lastSyncAt).not.toBeNull();
+    expect(store.syncInFlight).toBe(false);
+    expect(store.syncQueued).toBe(false);
+  });
+
+  it('a sync() call arriving while the queued follow-up is itself still in flight gets its own follow-up too', async () => {
+    // Proves the coalescing loop needs to be a `while`, not an `if`: a call
+    // landing during the SECOND (already-queued) _performSync must still
+    // schedule a third one, rather than being silently dropped once that
+    // second call settles. Uses a signal promise (resolved the instant the
+    // second backupApi.sync call actually fires) instead of guessing a
+    // fixed number of microtask flushes — deterministic regardless of how
+    // many internal await hops it takes to get there.
+    let resolveFirst;
+    let resolveSecond;
+    let signalSecondCallStarted;
+    const secondCallStarted = new Promise((resolve) => { signalSecondCallStarted = resolve; });
+
+    backupApi.sync
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }))
+      .mockImplementationOnce(() => {
+        signalSecondCallStarted();
+        return new Promise((r) => { resolveSecond = r; });
+      })
+      .mockResolvedValue(undefined);
+
+    const store = useBackupStore();
+    const first = store.sync();
+    const second = store.sync(); // queues behind the first
+
+    resolveFirst();
+    await secondCallStarted; // the queued follow-up is now itself in flight
+
+    // Arrives while that SECOND call is in flight. With `if (this.syncQueued)`
+    // this would be dropped once the second call settles; only a `while`
+    // loop re-checks the flag and fires a third request for it.
+    const third = store.sync();
+
+    resolveSecond();
+    await Promise.all([first, second, third]);
+
+    expect(backupApi.sync).toHaveBeenCalledTimes(3);
     expect(store.syncInFlight).toBe(false);
     expect(store.syncQueued).toBe(false);
   });

@@ -6522,6 +6522,7 @@ describe('CategoryTree — adding a category', () => {
     await wrapper.find('.category-tree__add-name').setValue('Здоровье');
     await wrapper.find('.category-tree__add-form').trigger('submit');
     expect(categoriesDb.createCategory).toHaveBeenCalledWith({ name: 'Здоровье', emoji: '💊', parentId: null });
+    await flushPromises();
     expect(wrapper.find('.category-tree__add-form').exists()).toBe(false);
   });
 
@@ -6558,6 +6559,32 @@ describe('CategoryTree — adding a category', () => {
       expect.objectContaining({ emoji: '📁' })
     );
   });
+
+  it('clears a typed draft when the form is canceled, rather than resurfacing it on reopen', async () => {
+    seed();
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-emoji').setValue('💊');
+    await wrapper.find('.category-tree__add-name').setValue('Здоровье');
+    await wrapper.find('.category-tree__add-toggle').trigger('click'); // ‹ Отмена
+    await wrapper.find('.category-tree__add-toggle').trigger('click'); // reopen
+    expect(wrapper.find('.category-tree__add-emoji').element.value).toBe('');
+    expect(wrapper.find('.category-tree__add-name').element.value).toBe('');
+  });
+
+  it('ignores a second submit while the first category creation is still in flight', async () => {
+    let resolveCreate;
+    categoriesDb.createCategory.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-name').setValue('Здоровье');
+    const form = wrapper.find('.category-tree__add-form');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolveCreate({ id: 'new1', name: 'Здоровье', emoji: '📁', parentId: null, archived: false });
+    await flushPromises();
+    expect(categoriesDb.createCategory).toHaveBeenCalledTimes(1);
+  });
 });
 ```
 
@@ -6565,6 +6592,12 @@ This also needs `useToastStore` imported at the top of the test file, alongside 
 
 ```js
 import { useToastStore } from '../../stores/toast.js';
+```
+
+**Note:** `submitAdd` is two `await`s deep (`categoriesStore.create` → `categoriesDb.createCategory`) before `addingOpen` resets — the same shape as `DebtsScreen.spec.js`'s own commit chain, where a single `trigger()`-implied `nextTick()` doesn't reliably drain it. The "creates a root category..." test above needs `await flushPromises();` before its final assertion (right after `await wrapper.find('.category-tree__add-form').trigger('submit');`), and `flushPromises` needs to be added to the existing `@vue/test-utils` import:
+
+```js
+import { mount, flushPromises } from '@vue/test-utils';
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -6579,14 +6612,14 @@ Expected: FAIL — `.category-tree__add-toggle` does not exist yet.
 Insert this new `<button>` and `<form>` as the first two children of `.category-tree`'s `<div>`, immediately before the existing `<div v-for="row in rows" ...>` (leave everything from that line down completely untouched):
 
 ```vue
-<button type="button" class="category-tree__add-toggle" @click="addingOpen = !addingOpen">
+<button type="button" class="category-tree__add-toggle" @click="toggleAddForm">
   {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
 </button>
 
 <form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
-  <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="4" />
+  <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="16" />
   <input v-model="newName" class="category-tree__add-name" placeholder="Название" />
-  <select v-model="newParentId" class="category-tree__add-parent">
+  <select v-model="newParentId" class="category-tree__add-parent" aria-label="Родительская категория">
     <option :value="null">Без родителя</option>
     <option v-for="row in rows" :key="row.category.id" :value="row.category.id">
       {{ '—'.repeat(row.depth) }} {{ row.category.name }}
@@ -6616,6 +6649,21 @@ data() {
 Add to `methods` (merge with the existing methods — `toggleRevealed`/`archive`/`transactionCountFor`/`confirmDelete` stay untouched):
 
 ```js
+// Shared by cancel and a successful submit — without this, tapping
+// ‹ Отмена left the typed name/emoji/parent sitting in data(), so
+// reopening the form (or a future edit-mode reuse of this same form)
+// would resurface a stale, possibly-abandoned-mid-entry draft, the same
+// "stale value on reopen" bug class already fixed once this session for
+// ExpenseModal (commit 51b34d9).
+resetAddForm() {
+  this.newName = '';
+  this.newEmoji = '';
+  this.newParentId = null;
+},
+toggleAddForm() {
+  this.addingOpen = !this.addingOpen;
+  if (!this.addingOpen) this.resetAddForm();
+},
 async submitAdd() {
   if (this.submitting) return;
   const name = this.newName.trim();
@@ -6630,10 +6678,8 @@ async submitAdd() {
       emoji: this.newEmoji.trim() || '📁',
       parentId: this.newParentId,
     });
-    this.newName = '';
-    this.newEmoji = '';
-    this.newParentId = null;
     this.addingOpen = false;
+    this.resetAddForm();
   } finally {
     this.submitting = false;
   }
@@ -6674,6 +6720,9 @@ Add to the `<style lang="scss">` block, alongside the existing `.tree-row { ... 
   }
 
   &__add-emoji {
+    // Same 44px-touch-target reasoning as __add-toggle/__add-parent — a
+    // text input is still something a real finger has to tap into.
+    min-height: 44px;
     width: 44px;
     text-align: center;
     background: var(--surface-sunken);
@@ -6682,6 +6731,7 @@ Add to the `<style lang="scss">` block, alongside the existing `.tree-row { ... 
   }
 
   &__add-name {
+    min-height: 44px;
     flex: 1;
     min-width: 100px;
     background: var(--surface-sunken);
@@ -6717,7 +6767,7 @@ Add to the `<style lang="scss">` block, alongside the existing `.tree-row { ... 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npm test -- src/components/settings/CategoryTree.spec.js`
-Expected: PASS (11 tests total — 6 from Task 23 plus 5 new).
+Expected: PASS (13 tests total — 6 from Task 23 plus 7 new).
 
 - [ ] **Step 5: Commit**
 
@@ -6725,6 +6775,16 @@ Expected: PASS (11 tests total — 6 from Task 23 plus 5 new).
 git add src/components/settings/CategoryTree.vue src/components/settings/CategoryTree.spec.js
 git commit -m "feat: add category creation form"
 ```
+
+**Note added during spec-compliance review:** the `submitting` guard had no test coverage in the initial implementation (commenting it out didn't fail anything) — the "ignores a second submit..." test above was added in a follow-up commit to close that gap, mirroring the equivalent tests in `DebtsScreen.spec.js`/`SettingsScreen.spec.js`.
+
+**Note added during code-quality review:** four issues were found and fixed after the above was first implemented, all reflected in the code blocks above:
+- **Important (data corruption):** `maxlength="4"` truncated real multi-codepoint emoji (gender/skin-tone/ZWJ sequences routinely exceed 4 UTF-16 units) mid-sequence, corrupting the stored category icon — confirmed with a real ZWJ emoji (🏋️‍♀️) via real browser text-insertion (not a framework helper, which doesn't exercise `maxlength` at all). Fixed by raising to `maxlength="16"`.
+- **Important (stale state):** canceling the form left the typed name/emoji/parent sitting in `data()`, resurfacing a stale draft on reopen — the same "stale value on reopen" bug class already fixed once this session for `ExpenseModal`. Fixed by extracting `resetAddForm()`, shared by both the cancel path (`toggleAddForm()`) and the successful-submit path (previously duplicated inline in each).
+- **Important (a11y):** the parent `<select>` had no accessible name. Fixed with `aria-label="Родительская категория"`.
+- **Important (touch target):** `.category-tree__add-emoji`/`.category-tree__add-name` measured under 44px in a real render (31px/32px, confirmed by temporarily zeroing `min-height` and re-measuring). Fixed with `min-height: 44px` on both, matching `__add-parent`'s existing rule.
+
+All four verified empirically in a real browser in a second review round (the ZWJ emoji round-trips untruncated all the way to the persisted IndexedDB record; all three form controls measure exactly 44px; the select's `aria-label` is present; canceling then reopening shows an empty form).
 
 ---
 

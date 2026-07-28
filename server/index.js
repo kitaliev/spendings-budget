@@ -72,15 +72,27 @@ const SNAPSHOT_KEYS = ['categories', 'transactions', 'budgetRates', 'debts', 'de
 // A minimal shape guard at the HTTP boundary — overwriteFromSnapshot itself
 // trusts its input completely (delete-then-reinsert, whatever it's given),
 // so this is the only thing standing between a malformed body and real data
-// loss. A wrong-typed value (e.g. `{ categories: "oops" }`) would otherwise
-// pass straight through: a string has a `.length` and is iterable
-// character-by-character, so it never throws — it just deletes every real
-// row in that table and inserts one junk all-NULL row per character.
-// Belongs here rather than in db.js because this is HTTP input validation,
-// the same way /api/login already validates its own body at this layer.
+// loss. Two layers, both closing the same failure mode: a wrong-typed
+// top-level value (e.g. `{ categories: "oops" }`) and an array whose
+// elements aren't row-shaped objects (e.g. `{ categories: [1, 2, 3] }`)
+// would otherwise both pass straight through — neither a string nor a
+// number/null/nested-array "row" has real column data, so `row[col]` is
+// just `undefined` for every column, which silently binds as NULL instead
+// of throwing. Either shape deletes every real row in that table and
+// replaces it with junk all-NULL rows, with the endpoint still returning
+// 200. Belongs here rather than in db.js because this is HTTP input
+// validation, the same way /api/login already validates its own body at
+// this layer. Deliberately NOT checked: individual field types within an
+// otherwise row-shaped object (e.g. `{ id: 123, name: {} }`) — a full
+// per-field schema validator is a proportionality call, not an oversight.
 function isValidSnapshot(snapshot) {
   if (typeof snapshot !== 'object' || snapshot === null || Array.isArray(snapshot)) return false;
-  return SNAPSHOT_KEYS.every((key) => !(key in snapshot) || Array.isArray(snapshot[key]));
+  return SNAPSHOT_KEYS.every((key) => {
+    if (!(key in snapshot)) return true;
+    const value = snapshot[key];
+    if (!Array.isArray(value)) return false;
+    return value.every((row) => typeof row === 'object' && row !== null && !Array.isArray(row));
+  });
 }
 
 // Every non-API GET falls back to index.html if the exact file doesn't

@@ -194,6 +194,30 @@ describe('server API — sync and restore', () => {
     assert.deepEqual(restored.categories, goodSnapshot.categories); // proves the malformed sync didn't touch existing data
   });
 
+  test('rejects a snapshot whose array contains non-object entries, without touching existing data', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      body: JSON.stringify({ password: 'hunter2' }),
+    });
+    const cookie = loginRes.headers.get('set-cookie');
+    const goodSnapshot = {
+      categories: [{ id: 'c1', name: 'Еда', emoji: '🍔', parentId: null, archived: false }],
+      transactions: [], budgetRates: [], debts: [], debtPayments: [],
+    };
+    await fetch(`${baseUrl}/api/sync`, { method: 'POST', headers: { cookie }, body: JSON.stringify(goodSnapshot) });
+
+    const res = await fetch(`${baseUrl}/api/sync`, {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ categories: [1, 2, 3], transactions: [], budgetRates: [], debts: [], debtPayments: [] }),
+    });
+    assert.equal(res.status, 400);
+
+    const restoreRes = await fetch(`${baseUrl}/api/restore`, { headers: { cookie } });
+    const restored = await restoreRes.json();
+    assert.deepEqual(restored.categories, goodSnapshot.categories);
+  });
+
   test('falls back to index.html for a missing file, and serves the real file content when it exists', async () => {
     const emptyDistDir = './test-empty-dist';
     fs.rmSync(emptyDistDir, { recursive: true, force: true });

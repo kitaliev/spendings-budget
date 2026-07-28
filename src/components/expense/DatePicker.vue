@@ -1,0 +1,121 @@
+<template>
+  <div class="date-row">
+    <button
+      type="button"
+      class="date-row__btn"
+      :class="{ 'date-row__btn--active': mode === 'today' }"
+      @click="$emit('update:modelValue', todayKeyValue())"
+    >Сегодня</button>
+    <button
+      type="button"
+      class="date-row__btn"
+      :class="{ 'date-row__btn--active': mode === 'yesterday' }"
+      @click="$emit('update:modelValue', yesterdayKeyValue())"
+    >Вчера</button>
+    <!-- Not a <button>: the real control here is the native <input type="date">
+         below. The <label> wraps it purely to extend the tap target to the
+         whole pill (matching the other two buttons) and to widen the accname
+         via standard label-wrapping-input semantics — no aria-label needed,
+         the sibling <span>'s text already becomes the input's accessible
+         name, and opacity:0 doesn't remove it from the a11y tree. -->
+    <label class="date-row__btn" :class="{ 'date-row__btn--active': mode === 'other' }">
+      <input type="date" class="date-row__native" :value="modelValue" @change="onNativeChange" />
+      <span>{{ otherLabel }}</span>
+    </label>
+  </div>
+</template>
+
+<script>
+import { todayKey, yesterdayKey, shortDate } from '../../utils/date.js';
+
+export default {
+  name: 'DatePicker',
+  props: {
+    modelValue: {
+      type: String,
+      required: true,
+    },
+  },
+  emits: ['update:modelValue'],
+  computed: {
+    mode() {
+      if (this.modelValue === todayKey()) return 'today';
+      if (this.modelValue === yesterdayKey()) return 'yesterday';
+      return 'other';
+    },
+    otherLabel() {
+      // Derived from modelValue, not tracked as separate mutable state — it
+      // must render correctly the instant this component mounts with an
+      // existing "other" date (e.g. Task 17 editing a past transaction), not
+      // only after the native input's own change handler has fired once.
+      if (this.mode !== 'other') return 'Другая дата';
+      return shortDate(this.modelValue);
+    },
+  },
+  methods: {
+    todayKeyValue: todayKey,
+    yesterdayKeyValue: yesterdayKey,
+    onNativeChange(event) {
+      const value = event.target.value;
+      if (!value) return;
+      this.$emit('update:modelValue', value);
+    },
+  },
+};
+</script>
+
+<style lang="scss">
+.date-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+
+  &__btn {
+    // min-height + flex-centering, not just padding — the same emergent-
+    // height gap already found and fixed on every other button this
+    // session, missed here since this is the first control below the
+    // amount display on the app's single most-used screen.
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex: 1;
+    text-align: center;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 9px 4px;
+    border-radius: 11px;
+    background: var(--surface-sunken);
+    color: var(--ink-secondary);
+    border: 1px solid transparent;
+    overflow: hidden;
+
+    &--active {
+      background: var(--accent-wash);
+      color: var(--accent-strong);
+      border-color: var(--accent);
+    }
+
+    // The third pill is a <label>, not a <button> — the global
+    // button:focus-visible rule (_reset.scss) never matches it. Its real
+    // control is the input below, whose own focus outline is invisible
+    // (opacity: 0 suppresses it along with everything else), so without
+    // this, Tab-cycling to the native date input shows no focus indicator
+    // at all.
+    &:focus-within {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+  }
+
+  &__native {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+}
+</style>

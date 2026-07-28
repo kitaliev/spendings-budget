@@ -1,0 +1,105 @@
+:root {
+  color-scheme: light;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --font-money: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --ground: #F3F5F4;
+  --surface: #FFFFFF;
+  --surface-raised: #E8EBEA;
+  --surface-sunken: #EDEFEE;
+  --ink: #14191B;
+  --ink-secondary: #52585B;
+  // #82898C only reached 3.25:1 against --ground / 3.56:1 against --surface
+  // — both below the 4.5:1 WCAG AA minimum for normal text, and this token
+  // is used at normal/small sizes for meaningful (non-decorative) text in
+  // most components. Darkened within the same low-saturation grey (same
+  // hue/sat, just lower lightness) to clear AA against every surface it's
+  // actually used on, including --surface-sunken (missed in an earlier
+  // pass, only 4.42:1): 4.80:1 / 5.25:1 / 4.55:1.
+  --ink-muted: #676D70;
+  // #A9762C under white --accent-ink text only reaches 3.95:1 — below AA.
+  // Darkened within the same hue/sat to 4.66:1. (Dark theme's pairing was
+  // already fine at 7.74:1, not touched.)
+  --accent: #9A6B28;
+  --accent-strong: #8F621F;
+  --accent-ink: #FFFFFF;
+  --accent-wash: rgba(169, 118, 44, .10);
+  --negative: #A8412B;
+  --negative-wash: rgba(168, 65, 43, .10);
+  --border: rgba(20, 25, 27, 0.10);
+  --border-strong: rgba(20, 25, 27, 0.16);
+  --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a;
+  --cat-4: #eda100; --cat-5: #e87ba4; --cat-6: #4a3aa7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --ground: #10161A;
+    --surface: #1A2226;
+    --surface-raised: #232C31;
+    --surface-sunken: #0C1114;
+    --ink: #EEEAE1;
+    --ink-secondary: #A7ADAF;
+    // #6E7679 only reached 3.93:1 against --ground / 3.48:1 against
+    // --surface — below AA. Lightened within the same grey (same hue/sat,
+    // higher lightness) to clear AA against the harder surface: 5.17:1 /
+    // 4.58:1. See the light-theme --ink-muted comment above for the same
+    // underlying issue.
+    --ink-muted: #818A8D;
+    --accent: #CC9F55;
+    --accent-strong: #E0B565;
+    --accent-ink: #171106;
+    --accent-wash: rgba(204, 159, 85, .14);
+    --negative: #D97A62;
+    --negative-wash: rgba(217, 122, 98, .14);
+    --border: rgba(238, 234, 225, 0.10);
+    --border-strong: rgba(238, 234, 225, 0.18);
+    --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70;
+    --cat-4: #c98500; --cat-5: #d55181; --cat-6: #9085e9;
+  }
+}
+
+// Phase 1 never sets data-theme itself (no in-app theme toggle yet) — these two
+// blocks exist as forward-compat scaffolding for one, and are unreachable until
+// something sets the attribute.
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #10161A;
+  --surface: #1A2226;
+  --surface-raised: #232C31;
+  --surface-sunken: #0C1114;
+  --ink: #EEEAE1;
+  --ink-secondary: #A7ADAF;
+  --ink-muted: #818A8D; // same WCAG-AA fix as the dark-mode block above
+  --accent: #CC9F55;
+  --accent-strong: #E0B565;
+  --accent-ink: #171106;
+  --accent-wash: rgba(204, 159, 85, .14);
+  --negative: #D97A62;
+  --negative-wash: rgba(217, 122, 98, .14);
+  --border: rgba(238, 234, 225, 0.10);
+  --border-strong: rgba(238, 234, 225, 0.18);
+  --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70;
+  --cat-4: #c98500; --cat-5: #d55181; --cat-6: #9085e9;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ground: #F3F5F4;
+  --surface: #FFFFFF;
+  --surface-raised: #E8EBEA;
+  --surface-sunken: #EDEFEE;
+  --ink: #14191B;
+  --ink-secondary: #52585B;
+  --ink-muted: #676D70; // same WCAG-AA fix as the light-theme block above
+  --accent: #9A6B28; // same WCAG-AA fix as the light-theme block above
+  --accent-strong: #8F621F;
+  --accent-ink: #FFFFFF;
+  --accent-wash: rgba(169, 118, 44, .10);
+  --negative: #A8412B;
+  --negative-wash: rgba(168, 65, 43, .10);
+  --border: rgba(20, 25, 27, 0.10);
+  --border-strong: rgba(20, 25, 27, 0.16);
+  --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a;
+  --cat-4: #eda100; --cat-5: #e87ba4; --cat-6: #4a3aa7;
+}

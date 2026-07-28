@@ -4374,6 +4374,13 @@ describe('BudgetDashboard on the current month', () => {
     const wrapper = mount(BudgetDashboard);
     expect(wrapper.find('.month-nav__arrow--next').attributes('disabled')).toBeDefined();
   });
+
+  it('shows the genitive month name and total spend in the stat row', () => {
+    const wrapper = mount(BudgetDashboard);
+    const stat = wrapper.find('.budget-dashboard__stat');
+    expect(stat.text()).toContain('Расход за июля');
+    expect(stat.text()).toContain('20 000 ₽');
+  });
 });
 
 describe('BudgetDashboard navigation to a past month', () => {
@@ -4397,6 +4404,18 @@ describe('BudgetDashboard navigation to a past month', () => {
     const marchColumn = wrapper.findAll('.month-chart__col')[2]; // Jan=0, Feb=1, Mar=2
     await marchColumn.trigger('click');
     expect(wrapper.find('.budget-dashboard__hero-value').text()).toBe('−2 600 ₽');
+  });
+
+  it('crosses a year boundary correctly when paging back past January', async () => {
+    const wrapper = mount(BudgetDashboard);
+    // Jul 2026 -> Jun -> May -> Apr -> Mar -> Feb -> Jan -> Dec 2025
+    for (let i = 0; i < 7; i += 1) await wrapper.find('.month-nav__arrow--prev').trigger('click');
+    expect(wrapper.find('.month-nav__label').text()).toBe('Декабрь 2025');
+    // chartMonths must now be rebuilt for 2025, with December (the 12th
+    // column) active, not still showing 2026's chart with nothing active.
+    const columns = wrapper.findAll('.month-chart__col');
+    expect(columns).toHaveLength(12);
+    expect(columns[11].classes()).toContain('month-chart__col--active');
   });
 });
 
@@ -4456,12 +4475,20 @@ import { useBudgetStore } from '../../stores/budget.js';
 import { formatMoney } from '../../utils/currency.js';
 import { todayKey, toMonthKey, monthNameWithYear } from '../../utils/date.js';
 
-// MONTH_NAMES doesn't exist here on purpose — monthLabel below reuses
-// monthNameWithYear() (utils/date.js), the same "Месяц ГГГГ" formatter
-// MonthChart's aria-labels already use, instead of a second, independently
-// maintained name array producing the same string a different way.
-const MONTH_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-const MONTH_INITIALS = ['Я', 'Ф', 'М', 'А', 'М', 'И', 'И', 'А', 'С', 'О', 'Н', 'Д'];
+// No MONTH_NAMES, MONTH_GENITIVE, or MONTH_INITIALS array here — every
+// Russian month string this component needs is derived from Intl at the
+// point of use (below), the same reasoning monthNameWithYear() already
+// applies: a hardcoded string list is a second source of truth that can
+// drift from what Intl actually produces, for zero benefit over deriving
+// it directly.
+function genitiveMonthName(monthNum) {
+  const withDay = new Date(2000, monthNum - 1, 1).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  return withDay.replace(/^\d+ /, '');
+}
+
+function monthInitial(monthNum) {
+  return new Date(2000, monthNum - 1, 1).toLocaleDateString('ru-RU', { month: 'long' }).charAt(0).toUpperCase();
+}
 
 function shiftMonth(monthKey, delta) {
   const [y, m] = monthKey.split('-').map(Number);
@@ -4472,6 +4499,11 @@ function shiftMonth(monthKey, delta) {
 export default {
   name: 'BudgetDashboard',
   components: { TopBar, MonthNav, MonthChart, CategoryPie },
+  // No store .load() call anywhere in this file, on purpose: screen-level
+  // components only read reactive state that App.vue already loaded once at
+  // startup. Keeps loading in one place and lets this component's own tests
+  // seed store state directly with no load() racing in to overwrite it.
+  // Apply the same rule to any other screen-level component.
   emits: ['open-settings'],
   data() {
     return {
@@ -4493,7 +4525,7 @@ export default {
     },
     monthGenitive() {
       const m = Number(this.currentMonthKey.slice(5, 7));
-      return MONTH_GENITIVE[m - 1];
+      return genitiveMonthName(m);
     },
     heroLabel() {
       return this.isCurrentMonth ? 'Бюджет на сегодня' : 'Остаток на конец месяца';
@@ -4512,7 +4544,7 @@ export default {
         const empty = key > realCurrentMonth;
         return {
           key,
-          short: MONTH_INITIALS[i],
+          short: monthInitial(i + 1),
           total: empty ? 0 : this.budgetStore.spendForMonth(key),
           empty,
           active: key === this.currentMonthKey,
@@ -4523,12 +4555,26 @@ export default {
   },
   methods: {
     formatMoney,
+    // No lower bound on purpose. Before any rate segment's effectiveFrom,
+    // availableForMonth/spendForMonth already resolve to a flat 0 rather
+    // than crashing (see rateActiveOn's "no fallback" comment in
+    // utils/budgetMath.js) — an arbitrarily old month just renders a plain
+    // "0 ₽" screen. Each tap moves exactly one month with no repeat or
+    // acceleration, so reaching a meaningless year takes thousands of taps;
+    // not worth a floor against a state that's both harmless and
+    // impractical to reach by accident. (nextMonth's bound is different: it
+    // stops a real, one-tap-away, user-visible case — showing a future
+    // month that hasn't happened yet.)
     prevMonth() {
       this.currentMonthKey = shiftMonth(this.currentMonthKey, -1);
     },
     nextMonth() {
       if (this.canGoNext) this.currentMonthKey = shiftMonth(this.currentMonthKey, 1);
     },
+    // key always comes from this month's own MonthChart, whose 12 columns
+    // are built from currentMonthKey's year (see chartMonths above) — this
+    // composition never hands back a key outside that year, so there is
+    // nothing here to validate against.
     goToMonth(key) {
       this.currentMonthKey = key;
     },
@@ -4538,7 +4584,16 @@ export default {
 
 <style lang="scss">
 .budget-dashboard {
+  // The screen's own outer margin — every child here (TopBar, hero, stat
+  // card, MonthChart, CategoryPie) only ever specifies its own SMALL
+  // internal padding (2-16px), none of it enough on its own to keep content
+  // off the physical screen edges. Confirmed by rendering this composed
+  // with real data at a real 390px viewport: without this, the hero figure,
+  // month labels, and section titles all sit flush against both edges.
+  padding: 0 18px;
+
   &__settings {
+    position: relative;
     width: 34px;
     height: 34px;
     border-radius: 50%;
@@ -4548,6 +4603,17 @@ export default {
     align-items: center;
     justify-content: center;
     font-size: 15px;
+
+    // Visual circle stays 34px per design, but the tappable area is widened
+    // to the 44px accessible touch-target minimum via an invisible hit area,
+    // same pattern as MonthNav's arrows. Symmetric on all sides (unlike
+    // MonthNav's) since nothing else shares this corner of TopBar for it to
+    // encroach on.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -5px;
+    }
   }
 
   &__hero {
@@ -4593,7 +4659,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/budget/BudgetDashboard.spec.js`
-Expected: PASS (7 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 5: Commit**
 

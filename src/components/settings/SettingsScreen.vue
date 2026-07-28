@@ -8,11 +8,20 @@
         <div class="settings-row">
           <span class="settings-row__label">Дневной бюджет</span>
           <form v-if="editingRate" class="settings-row__rate-form" @submit.prevent="saveRate">
-            <input v-model="rateInput" type="number" inputmode="decimal" class="settings-row__rate-input" />
+            <input
+              v-model="rateInput"
+              type="number"
+              inputmode="decimal"
+              min="1"
+              step="1"
+              placeholder="Сумма"
+              aria-label="Дневной бюджет"
+              class="settings-row__rate-input"
+            />
             <button type="submit" class="settings-row__rate-save">Сохранить</button>
           </form>
           <button v-else type="button" class="settings-row__value" @click="startEditingRate">
-            {{ formatMoney(budgetRatesStore.currentRate) }} <span>›</span>
+            {{ formatMoney(budgetRatesStore.currentRate) }} <span aria-hidden="true">›</span>
           </button>
         </div>
       </div>
@@ -77,6 +86,14 @@ export default {
 </script>
 
 <style lang="scss">
+// TopBar's own padding (6px 2px 14px) isn't enough alone to keep content off
+// the physical screen edges — the same gap already found and fixed in
+// BudgetDashboard and DebtsScreen's root, confirmed here too by rendering at
+// a real 390px viewport (.settings-list sat flush against both edges).
+.settings-screen {
+  padding: 0 18px;
+}
+
 .settings-group {
   margin-bottom: 22px;
 
@@ -128,6 +145,17 @@ export default {
     padding: 6px 8px;
     font-family: var(--font-money);
     font-size: 14px;
+    // Same rule as DebtCard's __pay-input and DebtsScreen's __add-amount —
+    // every numeric-ish input in this app is either fully custom or visually
+    // hidden; a bare spinner here would be the one unstyled system control
+    // left in the UI.
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
   }
 
   &__rate-save {

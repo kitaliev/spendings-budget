@@ -561,7 +561,7 @@ git commit -m "feat: add IndexedDB schema bootstrap"
 ```js
 // src/utils/currency.spec.js
 import { describe, it, expect } from 'vitest';
-import { formatMoney } from './currency.js';
+import { formatMoney, parsePositiveAmount } from './currency.js';
 
 describe('formatMoney', () => {
   it('groups thousands with a space and appends the ruble sign', () => {
@@ -579,6 +579,30 @@ describe('formatMoney', () => {
   it('handles zero', () => {
     expect(formatMoney(0)).toBe('0 ₽');
   });
+
+  it('does not render "−0 ₽" for a negative amount that rounds to zero', () => {
+    expect(formatMoney(-0.4)).toBe('0 ₽');
+  });
+});
+
+describe('parsePositiveAmount', () => {
+  it('parses and rounds a valid amount string', () => {
+    expect(parsePositiveAmount('2000')).toBe(2000);
+    expect(parsePositiveAmount('999.6')).toBe(1000);
+  });
+
+  it('returns null for empty or non-numeric input, not NaN', () => {
+    expect(parsePositiveAmount('')).toBeNull();
+    expect(parsePositiveAmount('abc')).toBeNull();
+  });
+
+  it('returns null for zero', () => {
+    expect(parsePositiveAmount('0')).toBeNull();
+  });
+
+  it('returns null for a negative amount', () => {
+    expect(parsePositiveAmount('-500')).toBeNull();
+  });
 });
 ```
 
@@ -591,17 +615,33 @@ Expected: FAIL — `formatMoney` is not defined.
 
 ```js
 export function formatMoney(amount) {
-  const isNegative = amount < 0;
   const rounded = Math.round(Math.abs(amount));
+  // isNegative also checks the rounded value, not just the raw sign — a
+  // small negative amount like -0.4 rounds to 0, and "−0 ₽" would be a
+  // confusing, incorrect display for a rounded-away-to-nothing value.
+  const isNegative = amount < 0 && rounded !== 0;
   const grouped = String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   return (isNegative ? '−' : '') + grouped + ' ₽';
+}
+
+// Parses a raw amount-input string (a debt payment, a new debt's amount,
+// ...) into a whole-ruble positive integer, or null if it isn't one.
+// `null` uniformly covers NaN (empty/garbage text), zero, and negative
+// values — the same three-way guard needed at every amount-entry point in
+// this app, rather than duplicating Math.round(parseFloat(...)) plus a
+// !(amount > 0) check at each one.
+export function parsePositiveAmount(value) {
+  const amount = Math.round(parseFloat(value));
+  return amount > 0 ? amount : null;
 }
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/utils/currency.spec.js`
-Expected: PASS (4 tests).
+Expected: PASS (9 tests).
+
+**Note added later:** the negative-rounds-to-zero fix and `parsePositiveAmount` weren't part of this task's original scope — the former was found by code review shortly after this task shipped, the latter was extracted once Tasks 21/28 both needed the identical parse-and-validate logic for a debt amount. Both are folded into the code above; a fresh implementer building this task from scratch should include them from the start.
 
 - [ ] **Step 5: Write the failing test for date helpers**
 
@@ -4850,7 +4890,7 @@ Expected: FAIL — module `./DebtCard.vue` does not exist.
 <script>
 import { useDebtsStore } from '../../stores/debts.js';
 import { useToastStore } from '../../stores/toast.js';
-import { formatMoney } from '../../utils/currency.js';
+import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 import { todayKey, shortDate } from '../../utils/date.js';
 
 export default {
@@ -4900,11 +4940,10 @@ export default {
       // A native number input still allows a leading "-" regardless of
       // inputmode/min/step (those are soft UI hints, not enforcement —
       // @submit.prevent also skips native constraint-validation blocking).
-      // !(amount > 0) rejects NaN (empty/invalid text), zero, and negative
-      // values uniformly — a plain `amount <= 0` check would let NaN
-      // through, since every comparison against NaN is false.
-      const amount = Math.round(parseFloat(this.payAmount));
-      if (!(amount > 0)) {
+      // parsePositiveAmount rejects NaN (empty/invalid text), zero, and
+      // negative values uniformly, returning null for all three.
+      const amount = parsePositiveAmount(this.payAmount);
+      if (!amount) {
         useToastStore().show('Сумма должна быть больше нуля');
         return;
       }
@@ -5037,6 +5076,12 @@ export default {
   }
 
   &__pay-btn {
+    // Same emergent-height gap as .debt-card__top above (measured ~36px in
+    // a real browser with just 10px vertical padding and a 13.5px line).
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 10px 16px;
     border-radius: 11px;
     background: var(--accent);
@@ -6700,7 +6745,7 @@ Replace the `<template>` block with:
 
     <form v-if="addingOpen" class="debts-screen__add-form" @submit.prevent="submitAdd">
       <input v-model="newName" class="debts-screen__add-name" placeholder="Название" />
-      <input v-model="newAmount" type="number" inputmode="decimal" class="debts-screen__add-amount" placeholder="Сумма" />
+      <input v-model="newAmount" type="number" inputmode="decimal" min="1" step="1" class="debts-screen__add-amount" placeholder="Сумма" />
       <input v-model="newComment" class="debts-screen__add-comment" placeholder="Комментарий (необязательно)" />
       <button type="submit" class="debts-screen__add-submit">Добавить</button>
     </form>
@@ -6767,8 +6812,8 @@ Add to `methods` (merge with the existing `formatMoney`):
 async submitAdd() {
   if (this.submitting) return;
   const name = this.newName.trim();
-  const amount = Math.round(parseFloat(this.newAmount));
-  if (!name || !(amount > 0)) {
+  const amount = parsePositiveAmount(this.newAmount);
+  if (!name || !amount) {
     useToastStore().show(!name ? 'Введите название' : 'Сумма должна быть больше нуля');
     return;
   }
@@ -6790,10 +6835,11 @@ async submitAdd() {
 },
 ```
 
-Add to the imports (merge with the existing ones):
+Add to the imports (merge with the existing ones — change the existing `formatMoney`-only import from `utils/currency.js` to include `parsePositiveAmount` too):
 
 ```js
 import { useToastStore } from '../../stores/toast.js';
+import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 ```
 
 Add to the `<style lang="scss">` block:
@@ -6835,6 +6881,17 @@ Add to the `<style lang="scss">` block:
   &__add-amount {
     flex: 1;
     min-width: 80px;
+    // Hide the native up/down stepper — DebtCard's own pay-input already
+    // established this as an app-wide rule (every numeric-ish input is
+    // either fully custom or visually hidden; a bare spinner would be the
+    // one unstyled system control left in the UI).
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
   }
 
   &__add-comment {
@@ -6851,6 +6908,13 @@ Add to the `<style lang="scss">` block:
   }
 
   &__add-submit {
+    // Same emergent-height gap as .segmented__opt/.closed-toggle in this
+    // same file (measured ~36px in a real browser with just 10px padding
+    // and a 13.5px line).
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: 1 1 100%;
     padding: 10px;
     border-radius: 11px;

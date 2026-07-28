@@ -3270,6 +3270,7 @@ import { setActivePinia, createPinia } from 'pinia';
 import ExpenseModal from './ExpenseModal.vue';
 import { useCategoriesStore } from '../../stores/categories.js';
 import * as transactionsDb from '../../db/transactions.js';
+import { todayKey } from '../../utils/date.js';
 
 vi.mock('../../db/transactions.js');
 
@@ -3436,6 +3437,23 @@ describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent 
     await commitPromise;
     expect(wrapper.vm.date).toBe('2026-07-26');
   });
+
+  it('clears an abandoned, uncommitted amount when reopened for a new add-session, even though editingTransaction stays null on both sides', async () => {
+    // App.vue keeps a single persistent instance and resets editingTransaction
+    // to null on every close — but it was already null for an add-session, so
+    // the editingTransaction watcher never re-fires on that unchanged value.
+    // Only the visible prop actually transitions on a close-then-FAB-reopen
+    // cycle, which is what the fix under test reacts to instead.
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    await findKey(wrapper, '5').trigger('click');
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5');
+
+    await wrapper.setProps({ visible: false }); // closed without picking a category
+    await wrapper.setProps({ visible: true }); // reopened via the FAB
+
+    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0');
+    expect(wrapper.vm.date).toBe(todayKey());
+  });
 });
 
 describe('ExpenseModal — editing an existing expense', () => {
@@ -3585,6 +3603,21 @@ export default {
           this.date = todayKey();
         }
       },
+    },
+    // Covers the one case the watcher above can't: App.vue (Task 25) keeps a
+    // single persistent instance and closing an add-session sets
+    // editingTransaction to null when it was already null, so that watcher
+    // never re-fires. Without this, closing the sheet on an abandoned,
+    // uncommitted amount (typed but no category ever tapped) and reopening
+    // via the FAB would resurface the stale amount/date/drill-down with
+    // zero warning — a real risk of recording a wrong transaction in a
+    // money-tracking app.
+    visible(isVisible) {
+      if (isVisible && !this.editingTransaction) {
+        this.raw = '';
+        this.date = todayKey();
+        this.$refs.picker?.reset();
+      }
     },
   },
   methods: {
@@ -3792,9 +3825,11 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/expense/ExpenseModal.spec.js`
-Expected: PASS (18 tests).
+Expected: PASS (19 tests).
 
 **Verified in this diligence pass:** a code-quality review of the first implementation, built against the reference code above minus the `submitting` guard on `onKey`, the `isSameSession`/`committedDate` checks, and the operator-replace/rounding/aria-dialog details, empirically reproduced a crash, a silent data-loss bug, and a silent lockout — all from exactly the persistent-instance scenario described at the top of this task — by writing and running throwaway specs against the built component. A second review pass, after those were fixed, found two narrower instances of the same bug class (the `date` field and the edit-mode session check using reference equality instead of id). The reference code above already has every one of those fixes folded in — do not simplify any of them away.
+
+**Note added during Task 25's code-quality review:** once App.vue (Task 25) actually wired this component into the FAB's reopen flow, a third instance of the same bug class surfaced — closing an *add*-session (editingTransaction already null) and reopening via the FAB left a stale, abandoned amount on screen with zero warning, since editingTransaction stays null on both sides of that transition and the watcher above never re-fires on an unchanged value. The `visible` watcher above (added at that point) is the fix — reset raw/date/the picker specifically on a false→true `visible` transition while editingTransaction is null. Verified via a mutation test (the added spec genuinely fails without this watcher) and live in a real browser, and confirmed the fix doesn't disturb a legitimate edit session opened directly (editingTransaction non-null from the start).
 
 - [ ] **Step 5: Commit**
 
@@ -6035,6 +6070,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import App from './App.vue';
+import { useToastStore } from './stores/toast.js';
 import * as categoriesDb from './db/categories.js';
 import * as ratesDb from './db/budgetRates.js';
 import * as transactionsDb from './db/transactions.js';
@@ -6058,13 +6094,63 @@ beforeEach(() => {
 });
 
 describe('App on launch', () => {
-  it('loads every store on mount', async () => {
+  it('loads every store on mount, exactly once', async () => {
     mount(App);
     await flushPromises();
-    expect(categoriesDb.seedDefaultCategoryIfEmpty).toHaveBeenCalled();
-    expect(ratesDb.seedDefaultRateIfEmpty).toHaveBeenCalled();
-    expect(transactionsDb.listTransactions).toHaveBeenCalled();
-    expect(debtsDb.listDebts).toHaveBeenCalled();
+    expect(categoriesDb.seedDefaultCategoryIfEmpty).toHaveBeenCalledTimes(1);
+    expect(ratesDb.seedDefaultRateIfEmpty).toHaveBeenCalledTimes(1);
+    expect(transactionsDb.listTransactions).toHaveBeenCalledTimes(1);
+    expect(debtsDb.listDebts).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads every store concurrently rather than one after another', async () => {
+    let resolveCategories, resolveRates, resolveTransactions, resolveDebts;
+    categoriesDb.seedDefaultCategoryIfEmpty.mockReturnValue(new Promise((r) => { resolveCategories = r; }));
+    ratesDb.seedDefaultRateIfEmpty.mockReturnValue(new Promise((r) => { resolveRates = r; }));
+    transactionsDb.listTransactions.mockReturnValue(new Promise((r) => { resolveTransactions = r; }));
+    debtsDb.listDebts.mockReturnValue(new Promise((r) => { resolveDebts = r; }));
+
+    mount(App);
+    await flushPromises();
+    // If these were awaited one at a time instead of via Promise.all, only
+    // the first store's gating call would have been invoked by now — the
+    // rest wouldn't even start until that first store's own load() (which
+    // itself awaits a second db call after this one) had fully resolved.
+    expect(categoriesDb.seedDefaultCategoryIfEmpty).toHaveBeenCalledTimes(1);
+    expect(ratesDb.seedDefaultRateIfEmpty).toHaveBeenCalledTimes(1);
+    expect(transactionsDb.listTransactions).toHaveBeenCalledTimes(1);
+    expect(debtsDb.listDebts).toHaveBeenCalledTimes(1);
+
+    resolveCategories(undefined);
+    resolveRates(undefined);
+    resolveTransactions([]);
+    resolveDebts([]);
+    await flushPromises();
+  });
+
+  it('shows a loading state until every store resolves, then the dashboard', async () => {
+    let resolveCategories;
+    categoriesDb.listCategories.mockReturnValue(new Promise((r) => { resolveCategories = r; }));
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('.app-shell__loading').exists()).toBe(true);
+    expect(wrapper.findComponent({ name: 'BudgetDashboard' }).exists()).toBe(false);
+
+    resolveCategories([]);
+    await flushPromises();
+    expect(wrapper.find('.app-shell__loading').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'BudgetDashboard' }).exists()).toBe(true);
+  });
+
+  it('shows a toast and still leaves the loading state if a store fails to load', async () => {
+    categoriesDb.listCategories.mockRejectedValue(new Error('IndexedDB blocked'));
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(useToastStore().message).toBe('Не удалось загрузить данные. Перезапустите приложение.');
+    // Doesn't get stuck on the loading screen forever...
+    expect(wrapper.find('.app-shell__loading').exists()).toBe(false);
+    // ...but also doesn't force the always-on-launch modal open onto broken data.
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(false);
   });
 
   it('shows the expense modal immediately, unprompted', async () => {
@@ -6078,6 +6164,14 @@ describe('App on launch', () => {
     await flushPromises();
     expect(wrapper.findComponent({ name: 'BudgetDashboard' }).exists()).toBe(true);
     expect(wrapper.findComponent({ name: 'DebtsScreen' }).exists()).toBe(false);
+  });
+
+  it('renders a message from the toast store', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    useToastStore().show('Тест');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findComponent({ name: 'Toast' }).props('message')).toBe('Тест');
   });
 });
 
@@ -6106,9 +6200,35 @@ describe('App navigation', () => {
     await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('open-settings');
     await wrapper.vm.$nextTick();
     expect(wrapper.findComponent({ name: 'SettingsScreen' }).exists()).toBe(true);
+    expect(wrapper.find('.app-shell__settings-close').attributes('type')).toBe('button');
     await wrapper.find('.app-shell__settings-close').trigger('click');
     await wrapper.vm.$nextTick();
     expect(wrapper.findComponent({ name: 'SettingsScreen' }).exists()).toBe(false);
+  });
+
+  it('makes the covered dashboard/tabs inert while the settings overlay is open, so a keyboard user cannot reach hidden controls underneath it', async () => {
+    // happy-dom doesn't implement the `inert` IDL property on HTMLElement,
+    // so Vue can't shortcut this binding through the property path the way
+    // it does for e.g. `disabled` — it falls back to a literal string
+    // attribute ("true"/"false") instead of omitting/adding a bare `inert`.
+    // Real Chrome does implement the property and was already used (via
+    // Puppeteer, for CategoryTree's identical pattern) to prove the actual
+    // focus-blocking behavior works; this test only guards the binding
+    // expression itself against regressing.
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('false');
+    expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('false');
+
+    await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('open-settings');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('true');
+    expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('true');
+
+    await wrapper.find('.app-shell__settings-close').trigger('click');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.app-shell__content').attributes('inert')).toBe('false');
+    expect(wrapper.find('.app-shell__tabs').attributes('inert')).toBe('false');
   });
 });
 ```
@@ -6123,12 +6243,15 @@ Expected: FAIL — the placeholder `App.vue` from Task 1 has none of this wiring
 ```vue
 <template>
   <div id="app-shell" class="app-shell">
-    <div class="app-shell__content">
-      <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
-      <DebtsScreen v-else />
+    <div class="app-shell__content" :inert="showSettings">
+      <template v-if="ready">
+        <BudgetDashboard v-if="activeTab === 'budget'" @open-settings="showSettings = true" />
+        <DebtsScreen v-else />
+      </template>
+      <p v-else class="app-shell__loading">Загрузка…</p>
     </div>
 
-    <div class="app-shell__tabs">
+    <div class="app-shell__tabs" :inert="showSettings">
       <Toast :message="toastStore.message" />
       <TabBar :active-tab="activeTab" @update:active-tab="activeTab = $event" @add-expense="openAddModal" />
     </div>
@@ -6164,9 +6287,16 @@ export default {
   components: { BudgetDashboard, DebtsScreen, SettingsScreen, ExpenseModal, TabBar, Toast },
   data() {
     return {
+      // Every store read on screen (dashboard figures, category list, debts)
+      // is empty until created()'s Promise.all below resolves — rendering
+      // the real screens before then shows a misleadingly-confident "0 ₽"
+      // and an empty, non-functional category picker in the always-on-launch
+      // modal, worst on exactly the cold-IndexedDB case that matters most
+      // for a first impression.
+      ready: false,
       activeTab: 'budget',
       showSettings: false,
-      showExpenseModal: true, // greets the user on every launch, per spec §8
+      showExpenseModal: false, // flips true once ready, see created() below
       editingTransaction: null,
     };
   },
@@ -6176,12 +6306,24 @@ export default {
     },
   },
   async created() {
-    await Promise.all([
-      useCategoriesStore().load(),
-      useBudgetRatesStore().load(),
-      useTransactionsStore().load(),
-      useDebtsStore().load(),
-    ]);
+    try {
+      await Promise.all([
+        useCategoriesStore().load(),
+        useBudgetRatesStore().load(),
+        useTransactionsStore().load(),
+        useDebtsStore().load(),
+      ]);
+      this.showExpenseModal = true; // greets the user on every launch, once there's real data to enter against
+    } catch (err) {
+      // Nothing else in this app has a retry affordance for a failed initial
+      // load (quota exceeded, IndexedDB blocked in private mode, etc.) — a
+      // toast at least tells the user why the screen came up empty, rather
+      // than leaving them to guess. `ready` still flips in `finally` so the
+      // app isn't stuck on the loading screen forever.
+      useToastStore().show('Не удалось загрузить данные. Перезапустите приложение.');
+    } finally {
+      this.ready = true;
+    }
   },
   methods: {
     openAddModal() {
@@ -6215,6 +6357,13 @@ export default {
     position: relative;
     overflow-y: auto;
     min-height: 0; // lets this child actually shrink/scroll instead of stretching .app-shell
+  }
+
+  &__loading {
+    padding: 40px 18px;
+    text-align: center;
+    color: var(--ink-muted);
+    font-size: 14px;
   }
 
   &__tabs {
@@ -6272,12 +6421,12 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/App.spec.js`
-Expected: PASS (6 tests).
+Expected: PASS (11 tests).
 
 - [ ] **Step 5: Run the full test suite**
 
 Run: `npm test`
-Expected: every spec file across the project passes (data layer, stores, and components — roughly 100 tests).
+Expected: every spec file across the project passes (data layer, stores, and components — roughly 220 tests).
 
 - [ ] **Step 6: Manual smoke test in a real browser**
 
@@ -6299,6 +6448,15 @@ Report the outcome of this walkthrough before considering the phase done — do 
 git add src/App.vue src/App.spec.js
 git commit -m "feat: wire App shell — tabs, settings overlay, always-on-launch expense modal"
 ```
+
+**Note added during code-quality review:** this was the first point every component and store got wired together at once, and that surfaced four issues invisible to any single component's own review — all reflected in the code above:
+
+- **Critical:** `.app-shell__content`/`.app-shell__tabs` stayed fully focusable and hit-testable while visually covered by the settings overlay (only `z-index` separated them) — the exact off-canvas focus-trap bug class already fixed once in `CategoryTree` (Task 23) via `inert`, recurring here because this is the one place a full-screen overlay stacks over live siblings. Fixed with `:inert="showSettings"` on both. Verified in real Chrome, not just happy-dom (this project's unit-test environment, which has no `inert` IDL property and would give a misleadingly stringified `inert="true"`/`"false"` attribute either way — real Chrome uses the actual boolean property and was independently confirmed to block both focus and `elementFromPoint` hit-testing while covered, and restore both once the overlay closes).
+- **Critical:** closing an abandoned add-session (typed amount, no category ever tapped) and reopening via the FAB left the stale amount on screen — see the note on Task 17 above; the fix lives in `ExpenseModal.vue`, not this file.
+- **Important:** no loading state while the four stores load in `created()` — the always-on-launch modal's category list was fully empty and the dashboard showed a misleadingly-confident "0 ₽" for the whole gap, worst on a cold IndexedDB. Fixed with the `ready` flag above, gating the dashboard/debts screens behind `.app-shell__loading`; the expense modal now only auto-opens once there's real data to enter against.
+- **Important:** no error handling around the `Promise.all` — a rejected store load left the app silently stuck. Fixed with try/catch/finally as shown above.
+
+All four verified independently in a second review round: real-browser Puppeteer checks for both Critical items (focus + hit-testing blocked/restored correctly), and mounted-component tests with deferred/rejected promises for both Important items.
 
 ---
 

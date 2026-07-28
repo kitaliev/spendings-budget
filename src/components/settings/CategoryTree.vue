@@ -1,5 +1,21 @@
 <template>
   <div class="category-tree">
+    <button type="button" class="category-tree__add-toggle" @click="addingOpen = !addingOpen">
+      {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
+    </button>
+
+    <form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
+      <input v-model="newEmoji" class="category-tree__add-emoji" placeholder="🙂" maxlength="4" />
+      <input v-model="newName" class="category-tree__add-name" placeholder="Название" />
+      <select v-model="newParentId" class="category-tree__add-parent">
+        <option :value="null">Без родителя</option>
+        <option v-for="row in rows" :key="row.category.id" :value="row.category.id">
+          {{ '—'.repeat(row.depth) }} {{ row.category.name }}
+        </option>
+      </select>
+      <button type="submit" class="category-tree__add-submit">Создать</button>
+    </form>
+
     <div
       v-for="row in rows"
       :key="row.category.id"
@@ -33,6 +49,7 @@
 <script>
 import { useCategoriesStore } from '../../stores/categories.js';
 import { useTransactionsStore } from '../../stores/transactions.js';
+import { useToastStore } from '../../stores/toast.js';
 
 // Takes childrenOf itself (a bound function), not a raw array to re-filter
 // — childrenOf already IS "categories with this parentId," so refiltering
@@ -69,6 +86,13 @@ export default {
   data() {
     return {
       revealedId: null,
+      addingOpen: false,
+      newName: '',
+      newEmoji: '',
+      newParentId: null,
+      // Same reasoning as every other submitting guard this session — neither
+      // the db layer nor the store rejects a second concurrent create() call.
+      submitting: false,
     };
   },
   computed: {
@@ -102,11 +126,97 @@ export default {
       );
       if (confirmed) await this.categoriesStore.remove(category.id);
     },
+    async submitAdd() {
+      if (this.submitting) return;
+      const name = this.newName.trim();
+      if (!name) {
+        useToastStore().show('Введите название');
+        return;
+      }
+      this.submitting = true;
+      try {
+        await this.categoriesStore.create({
+          name,
+          emoji: this.newEmoji.trim() || '📁',
+          parentId: this.newParentId,
+        });
+        this.newName = '';
+        this.newEmoji = '';
+        this.newParentId = null;
+        this.addingOpen = false;
+      } finally {
+        this.submitting = false;
+      }
+    },
   },
 };
 </script>
 
 <style lang="scss">
+.category-tree {
+  &__add-toggle {
+    // min-height + flex-centering, not just padding — the same emergent-
+    // height gap already found and fixed on every other text/icon button
+    // this session (CategoryTree's own tree-row__more among them).
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 0 14px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--accent-strong);
+  }
+
+  &__add-form {
+    display: flex;
+    gap: 6px;
+    padding: 0 14px 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  &__add-emoji {
+    width: 44px;
+    text-align: center;
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 6px;
+  }
+
+  &__add-name {
+    flex: 1;
+    min-width: 100px;
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+
+  &__add-parent {
+    // Same min-height reasoning as __add-toggle above — a native <select>
+    // with just 6px vertical padding and a 13px line renders well under
+    // the 44px touch-target minimum on a real phone, same as a custom
+    // button would.
+    min-height: 44px;
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
+  &__add-submit {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    color: var(--accent-strong);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 6px 12px;
+  }
+}
+
 .tree-row {
   display: flex;
   align-items: center;

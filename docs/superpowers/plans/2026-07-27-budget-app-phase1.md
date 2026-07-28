@@ -1183,6 +1183,7 @@ Expected: FAIL — module `./categories.js` does not exist in `src/stores/`.
 ```js
 import { defineStore } from 'pinia';
 import * as categoriesDb from '../db/categories.js';
+import { useTransactionsStore } from './transactions.js';
 
 export const useCategoriesStore = defineStore('categories', {
   state: () => ({
@@ -1231,8 +1232,16 @@ export const useCategoriesStore = defineStore('categories', {
       this.items = await categoriesDb.listCategories();
     },
     async remove(id) {
+      // deleteCategory cascades to every transaction belonging to id's
+      // whole subtree, in the same IndexedDB transaction (db/categories.js)
+      // — but that's invisible to transactionsStore's own in-memory items
+      // unless reloaded here too. Without this, budgetStore.spendForMonth/
+      // availableForMonth (which sum transactionsStore.items directly, with
+      // no check for whether a transaction's category still exists) would
+      // keep counting the deleted transactions until an unrelated reload.
       await categoriesDb.deleteCategory(id);
       this.items = await categoriesDb.listCategories();
+      await useTransactionsStore().load();
     },
   },
 });
@@ -1244,6 +1253,8 @@ Run: `npm test -- src/stores/categories.spec.js`
 Expected: PASS (6 tests).
 
 **Note added during Task 19's review:** `subtreeIds` didn't exist when this task was first written — CategoryPie (Task 19) originally implemented the same recursive walk locally, then it was moved here since it's pure category-tree logic with no dependency on CategoryPie or transactions, the same reasoning as `childrenOf`/`rootCategories` already living on this store. Include it now rather than adding it in Task 19.
+
+**Note added during Task 23's code-quality review:** the `remove` action originally only reloaded `categoriesStore.items` (as written above). A CategoryTree (Task 23) reviewer caught that `transactionsStore.items` was left stale after a delete cascade — its in-memory `items` array has no way to know the db layer just removed rows out from under it. Fixed by importing `useTransactionsStore` and reloading it too, as shown above; a matching test was added to `categories.spec.js` (mocking `../db/transactions.js` and asserting `listTransactions` is called after `remove`).
 
 - [ ] **Step 10: Commit**
 
@@ -5475,7 +5486,7 @@ Expected: FAIL — module `./CategoryTree.vue` does not exist.
       v-for="row in rows"
       :key="row.category.id"
       class="tree-row"
-      :class="{ 'tree-row--sub': row.depth > 0, 'tree-row--revealed': revealedId === row.category.id }"
+      :class="{ 'tree-row--revealed': revealedId === row.category.id }"
       :style="{ paddingLeft: 14 + row.depth * 24 + 'px' }"
     >
       <span class="tree-row__emoji">{{ row.category.emoji }}</span>
@@ -5487,7 +5498,13 @@ Expected: FAIL — module `./CategoryTree.vue` does not exist.
         :aria-expanded="revealedId === row.category.id ? 'true' : 'false'"
         @click="toggleRevealed(row.category.id)"
       >⋯</button>
-      <div class="tree-row__actions">
+      <!-- transform: translateX(100%) (below) only moves this box visually
+           — it stays focusable, tabbable, and hit-testable even while off
+           the visible row (a well-known off-canvas pitfall), which would
+           let ordinary Tab navigation reach and activate an unconfirmed,
+           effectively-irreversible Archive on every row. inert removes it
+           from focus/tab order/hit-testing entirely while hidden. -->
+      <div class="tree-row__actions" :inert="revealedId !== row.category.id">
         <button type="button" class="tree-row__action tree-row__action--archive" @click="archive(row.category.id)">Архив</button>
         <button type="button" class="tree-row__action tree-row__action--delete" @click="confirmDelete(row.category)">Удалить</button>
       </div>
@@ -5499,12 +5516,15 @@ Expected: FAIL — module `./CategoryTree.vue` does not exist.
 import { useCategoriesStore } from '../../stores/categories.js';
 import { useTransactionsStore } from '../../stores/transactions.js';
 
-function flattenTree(categories, parentId, depth) {
+// Takes childrenOf itself (a bound function), not a raw array to re-filter
+// — childrenOf already IS "categories with this parentId," so refiltering
+// a raw array here would just be a second, driftable copy of that same
+// logic with an extra depth counter layered on top.
+function flattenTree(childrenOf, parentId, depth) {
   const result = [];
-  const children = categories.filter((c) => c.parentId === parentId);
-  for (const child of children) {
+  for (const child of childrenOf(parentId)) {
     result.push({ category: child, depth });
-    result.push(...flattenTree(categories, child.id, depth + 1));
+    result.push(...flattenTree(childrenOf, child.id, depth + 1));
   }
   return result;
 }
@@ -5541,7 +5561,7 @@ export default {
       return useTransactionsStore();
     },
     rows() {
-      return flattenTree(this.categoriesStore.active, null, 0);
+      return flattenTree(this.categoriesStore.childrenOf, null, 0);
     },
   },
   methods: {
@@ -5641,11 +5661,21 @@ export default {
     color: #fff;
 
     &--archive {
-      background: #8a8f73;
+      // #8a8f73 (this chip's original color) only reaches 3.36:1 against
+      // this white text — below the 4.5:1 WCAG AA minimum. Darkened
+      // within the same olive family to 7.38:1.
+      background: #54583f;
     }
 
     &--delete {
-      background: var(--negative);
+      // Not var(--negative): that token is tuned as a *foreground* ink
+      // color (used elsewhere for text/icons on the app's own surface),
+      // with a dark-mode value intentionally lightened for legibility
+      // there — which is the opposite of what a solid fill behind white
+      // text needs (it fails contrast, 3.04:1, in dark mode). Fixed
+      // regardless of theme instead, like a dedicated destructive-action
+      // chip color: 6.08:1 against white.
+      background: #a8412b;
     }
   }
 }
@@ -5663,6 +5693,12 @@ Expected: PASS (6 tests).
 git add src/components/settings/CategoryTree.vue src/components/settings/CategoryTree.spec.js
 git commit -m "feat: add CategoryTree component with archive/delete"
 ```
+
+**Note added during code-quality review:** four issues were found and fixed after the above was first implemented, all reflected in the code blocks above:
+- **Critical (a11y):** the swipe-reveal `.tree-row__actions` box was only ever hidden via `transform: translateX(100%)` — visually off-canvas, but still focusable/tabbable/hit-testable, so keyboard Tab navigation could reach and activate an unconfirmed Archive/Delete on every row without ever revealing it. Fixed with `:inert="revealedId !== row.category.id"`. Verified empirically in a real browser (not jsdom): a direct `.focus()` call on a button inside an `inert` container fails, and succeeds once `inert` is removed.
+- **Important (staleness):** `categoriesStore.remove()` (Task 7) only reloaded its own `items`, leaving `transactionsStore.items` stale after `deleteCategory`'s cascade delete — fixed there (see Task 7's note above), not in this file.
+- **Important (contrast):** the archive/delete chip fills failed WCAG AA against their white text (3.36:1 and 3.04:1-in-dark-mode respectively, both below the 4.5:1 minimum) — fixed with the darker/fixed hex values shown above, verified at 7.38:1 and 6.08:1.
+- **Important (duplication):** `flattenTree` originally re-filtered a raw `categories` array by `parentId` itself, duplicating `childrenOf`'s own filtering logic with an extra depth counter on top. Fixed by parameterizing `flattenTree` on `childrenOf` (the store's own getter function) instead, as shown above. The dead `'tree-row--sub': row.depth > 0` class binding (no matching CSS rule ever existed) was also removed.
 
 ---
 

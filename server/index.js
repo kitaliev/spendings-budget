@@ -90,6 +90,7 @@ export function createApp(db, { hashPath, dbPath, backupDir }) {
 
       sendJson(res, 404, { ok: false, error: 'Not found' });
     } catch (err) {
+      console.error('[requestListener]', err);
       sendJson(res, 400, { ok: false, error: 'Некорректный запрос' });
     }
   };

@@ -20,8 +20,20 @@ function loadPasswordHash(hashFilePath) {
 export function checkOrRegisterPassword(hashFilePath, submittedPassword) {
   const storedHash = loadPasswordHash(hashFilePath);
   if (!storedHash) {
-    fs.writeFileSync(hashFilePath, bcrypt.hashSync(submittedPassword, 10), 'utf8');
-    return true;
+    try {
+      fs.writeFileSync(hashFilePath, bcrypt.hashSync(submittedPassword, 10), {
+        encoding: 'utf8',
+        mode: 0o600,
+        flag: 'wx',
+      });
+      return true;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      // Another concurrent request won the race and registered first —
+      // fall through and compare against whatever they actually stored,
+      // rather than silently overwriting it or crashing.
+      return bcrypt.compareSync(submittedPassword, loadPasswordHash(hashFilePath));
+    }
   }
   return bcrypt.compareSync(submittedPassword, storedHash);
 }

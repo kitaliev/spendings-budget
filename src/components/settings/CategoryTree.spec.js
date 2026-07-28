@@ -139,4 +139,19 @@ describe('CategoryTree — adding a category', () => {
       expect.objectContaining({ emoji: '📁' })
     );
   });
+
+  it('ignores a second submit while the first category creation is still in flight', async () => {
+    seed();
+    let resolveCreate;
+    categoriesDb.createCategory.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+    const wrapper = mount(CategoryTree);
+    await wrapper.find('.category-tree__add-toggle').trigger('click');
+    await wrapper.find('.category-tree__add-name').setValue('Спорт');
+    const form = wrapper.find('.category-tree__add-form');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolveCreate({ id: 'new4', name: 'Спорт', emoji: '📁', parentId: null, archived: false });
+    await flushPromises();
+    expect(categoriesDb.createCategory).toHaveBeenCalledTimes(1);
+  });
 });

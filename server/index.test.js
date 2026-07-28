@@ -69,4 +69,11 @@ describe('server API — login and status', () => {
     const res = await fetch(`${baseUrl}/api/nonsense`);
     assert.equal(res.status, 404);
   });
+
+  test('POST /api/login with a malformed JSON body is rejected, not fatal', async () => {
+    const res = await fetch(`${baseUrl}/api/login`, { method: 'POST', body: 'not json{' });
+    assert.equal(res.status, 400);
+    const stillUp = await fetch(`${baseUrl}/api/status`);
+    assert.equal(stillUp.status, 200); // proves the server process is still alive, not just this one request
+  });
 });

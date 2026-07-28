@@ -29,10 +29,33 @@ describe('DebtsScreen', () => {
     expect(names).toEqual(['Ипотека']);
   });
 
+  it('marks the active segment with aria-current', async () => {
+    const wrapper = mount(DebtsScreen);
+    const opts = wrapper.findAll('.segmented__opt');
+    expect(opts[0].attributes('aria-current')).toBe('true');
+    expect(opts[1].attributes('aria-current')).toBeUndefined();
+    await opts[1].trigger('click');
+    expect(opts[0].attributes('aria-current')).toBeUndefined();
+    expect(opts[1].attributes('aria-current')).toBe('true');
+  });
+
+  it('re-filters the closed list too when direction switches, not just the open one', async () => {
+    const wrapper = mount(DebtsScreen);
+    await wrapper.findAll('.segmented__opt')[1].trigger('click'); // -> i_owe, which has no closed debts
+    expect(wrapper.find('.closed-toggle').exists()).toBe(false);
+  });
+
   it('shows the closed count and keeps the list collapsed by default', () => {
     const wrapper = mount(DebtsScreen);
     expect(wrapper.find('.closed-toggle').text()).toContain('1');
     expect(wrapper.find('.closed-list').exists()).toBe(false);
+  });
+
+  it('hides the closed-toggle entirely when there are no closed debts, rather than showing a dead-end "Закрытые (0)"', () => {
+    const store = useDebtsStore();
+    store.payments = []; // nothing paid off -> nothing closed, in either direction
+    const wrapper = mount(DebtsScreen);
+    expect(wrapper.find('.closed-toggle').exists()).toBe(false);
   });
 
   it('expands the closed list when the toggle is clicked', async () => {

@@ -9,26 +9,29 @@
         type="button"
         class="segmented__opt"
         :class="{ 'segmented__opt--active': option.value === direction }"
+        :aria-current="option.value === direction ? 'true' : null"
         @click="direction = option.value"
       >{{ option.label }}</button>
     </div>
 
     <DebtCard v-for="debt in openDebts" :key="debt.id" :debt="debt" />
 
-    <button
-      type="button"
-      class="closed-toggle"
-      :aria-expanded="closedOpen ? 'true' : 'false'"
-      @click="closedOpen = !closedOpen"
-    >
-      <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
-    </button>
-    <div v-if="closedOpen" class="closed-list">
-      <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
-        <span class="closed-card__name">{{ debt.name }}</span>
-        <span>{{ formatMoney(debt.amount) }}</span>
+    <template v-if="closedDebts.length > 0">
+      <button
+        type="button"
+        class="closed-toggle"
+        :aria-expanded="closedOpen ? 'true' : 'false'"
+        @click="closedOpen = !closedOpen"
+      >
+        <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
+      </button>
+      <div v-if="closedOpen" class="closed-list">
+        <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
+          <span class="closed-card__name">{{ debt.name }}</span>
+          <span>{{ formatMoney(debt.amount) }}</span>
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -69,6 +72,15 @@ export default {
 </script>
 
 <style lang="scss">
+.debts-screen {
+  // Same gap as BudgetDashboard (commit 3e90b0c): every child here (TopBar,
+  // segmented control, DebtCard, closed-toggle) only specifies its own
+  // small internal padding, none of it enough alone to keep content off
+  // the physical screen edges. Confirmed by rendering this composed with
+  // real data at a real 390px viewport.
+  padding: 0 18px;
+}
+
 .segmented {
   display: flex;
   background: var(--surface-sunken);

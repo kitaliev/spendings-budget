@@ -39,6 +39,13 @@ describe('BudgetDashboard on the current month', () => {
     const wrapper = mount(BudgetDashboard);
     expect(wrapper.find('.month-nav__arrow--next').attributes('disabled')).toBeDefined();
   });
+
+  it('shows the genitive month name and total spend in the stat row', () => {
+    const wrapper = mount(BudgetDashboard);
+    const stat = wrapper.find('.budget-dashboard__stat');
+    expect(stat.text()).toContain('Расход за июля');
+    expect(stat.text()).toContain('20 000 ₽');
+  });
 });
 
 describe('BudgetDashboard navigation to a past month', () => {
@@ -62,6 +69,18 @@ describe('BudgetDashboard navigation to a past month', () => {
     const marchColumn = wrapper.findAll('.month-chart__col')[2]; // Jan=0, Feb=1, Mar=2
     await marchColumn.trigger('click');
     expect(wrapper.find('.budget-dashboard__hero-value').text()).toBe('−2 600 ₽');
+  });
+
+  it('crosses a year boundary correctly when paging back past January', async () => {
+    const wrapper = mount(BudgetDashboard);
+    // Jul 2026 -> Jun -> May -> Apr -> Mar -> Feb -> Jan -> Dec 2025
+    for (let i = 0; i < 7; i += 1) await wrapper.find('.month-nav__arrow--prev').trigger('click');
+    expect(wrapper.find('.month-nav__label').text()).toBe('Декабрь 2025');
+    // chartMonths must now be rebuilt for 2025, with December (the 12th
+    // column) active, not still showing 2026's chart with nothing active.
+    const columns = wrapper.findAll('.month-chart__col');
+    expect(columns).toHaveLength(12);
+    expect(columns[11].classes()).toContain('month-chart__col--active');
   });
 });
 

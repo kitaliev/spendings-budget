@@ -37,12 +37,20 @@ import { useBudgetStore } from '../../stores/budget.js';
 import { formatMoney } from '../../utils/currency.js';
 import { todayKey, toMonthKey, monthNameWithYear } from '../../utils/date.js';
 
-// MONTH_NAMES doesn't exist here on purpose — monthLabel below reuses
-// monthNameWithYear() (utils/date.js), the same "Месяц ГГГГ" formatter
-// MonthChart's aria-labels already use, instead of a second, independently
-// maintained name array producing the same string a different way.
-const MONTH_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-const MONTH_INITIALS = ['Я', 'Ф', 'М', 'А', 'М', 'И', 'И', 'А', 'С', 'О', 'Н', 'Д'];
+// No MONTH_NAMES, MONTH_GENITIVE, or MONTH_INITIALS array here — every
+// Russian month string this component needs is derived from Intl at the
+// point of use (below), the same reasoning monthNameWithYear() already
+// applies: a hardcoded string list is a second source of truth that can
+// drift from what Intl actually produces, for zero benefit over deriving
+// it directly.
+function genitiveMonthName(monthNum) {
+  const withDay = new Date(2000, monthNum - 1, 1).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  return withDay.replace(/^\d+ /, '');
+}
+
+function monthInitial(monthNum) {
+  return new Date(2000, monthNum - 1, 1).toLocaleDateString('ru-RU', { month: 'long' }).charAt(0).toUpperCase();
+}
 
 function shiftMonth(monthKey, delta) {
   const [y, m] = monthKey.split('-').map(Number);
@@ -53,6 +61,11 @@ function shiftMonth(monthKey, delta) {
 export default {
   name: 'BudgetDashboard',
   components: { TopBar, MonthNav, MonthChart, CategoryPie },
+  // No store .load() call anywhere in this file, on purpose: screen-level
+  // components only read reactive state that App.vue already loaded once at
+  // startup. Keeps loading in one place and lets this component's own tests
+  // seed store state directly with no load() racing in to overwrite it.
+  // Apply the same rule to any other screen-level component.
   emits: ['open-settings'],
   data() {
     return {
@@ -74,7 +87,7 @@ export default {
     },
     monthGenitive() {
       const m = Number(this.currentMonthKey.slice(5, 7));
-      return MONTH_GENITIVE[m - 1];
+      return genitiveMonthName(m);
     },
     heroLabel() {
       return this.isCurrentMonth ? 'Бюджет на сегодня' : 'Остаток на конец месяца';
@@ -93,7 +106,7 @@ export default {
         const empty = key > realCurrentMonth;
         return {
           key,
-          short: MONTH_INITIALS[i],
+          short: monthInitial(i + 1),
           total: empty ? 0 : this.budgetStore.spendForMonth(key),
           empty,
           active: key === this.currentMonthKey,
@@ -133,7 +146,16 @@ export default {
 
 <style lang="scss">
 .budget-dashboard {
+  // The screen's own outer margin — every child here (TopBar, hero, stat
+  // card, MonthChart, CategoryPie) only ever specifies its own SMALL
+  // internal padding (2-16px), none of it enough on its own to keep content
+  // off the physical screen edges. Confirmed by rendering this composed
+  // with real data at a real 390px viewport: without this, the hero figure,
+  // month labels, and section titles all sit flush against both edges.
+  padding: 0 18px;
+
   &__settings {
+    position: relative;
     width: 34px;
     height: 34px;
     border-radius: 50%;
@@ -143,6 +165,17 @@ export default {
     align-items: center;
     justify-content: center;
     font-size: 15px;
+
+    // Visual circle stays 34px per design, but the tappable area is widened
+    // to the 44px accessible touch-target minimum via an invisible hit area,
+    // same pattern as MonthNav's arrows. Symmetric on all sides (unlike
+    // MonthNav's) since nothing else shares this corner of TopBar for it to
+    // encroach on.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -5px;
+    }
   }
 
   &__hero {

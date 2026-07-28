@@ -168,6 +168,13 @@ describe('App — editing a transaction from the dashboard list', () => {
   it('opens the expense modal in edit mode with the selected transaction', async () => {
     const wrapper = mount(App);
     await flushPromises();
+    // Closed first, on purpose: created() already flips showExpenseModal to
+    // true unconditionally (the always-on-launch modal), so without this the
+    // visible === true assertion below would pass even if openEditModal did
+    // nothing at all — it would just be reading the launch-time state back.
+    // Closing first forces the assertion to only pass if edit-transaction
+    // itself reopens the modal.
+    await wrapper.findComponent({ name: 'ExpenseModal' }).vm.$emit('close');
     const transaction = { id: 't1', date: '2026-07-05', amount: 500, categoryId: 'food' };
     await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('edit-transaction', transaction);
     await wrapper.vm.$nextTick();

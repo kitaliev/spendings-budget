@@ -39,4 +39,14 @@ describe('TransactionList', () => {
     await wrapper.findAll('.transaction-list__row')[0].trigger('click');
     expect(wrapper.emitted('edit')[0][0]).toMatchObject({ id: 't2' });
   });
+
+  it('falls back to a placeholder emoji and label when a transaction has no matching category', () => {
+    useTransactionsStore().items = [
+      { id: 't4', date: '2026-07-10', amount: 300, categoryId: 'missing' },
+    ];
+    const wrapper = mount(TransactionList, { props: { monthKey: '2026-07' } });
+    const row = wrapper.find('.transaction-list__row');
+    expect(row.text()).toContain('❓');
+    expect(row.text()).toContain('Без категории');
+  });
 });

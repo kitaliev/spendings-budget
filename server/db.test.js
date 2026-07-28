@@ -59,4 +59,31 @@ describe('db', () => {
     const result = dumpToSnapshot(db);
     assert.equal(result.categories.find((c) => c.id === 'c4').parentId, 'c3');
   });
+
+  // Regression test: an earlier version derived the INSERT column list from
+  // Object.keys(rows[0]) alone. Here row 0 has fewer keys than row 1, so
+  // that earlier version generated an INSERT statement covering only
+  // id/name — row 1's emoji, parentId, and archived were silently dropped
+  // (better-sqlite3 ignores bound properties a prepared statement doesn't
+  // reference; it only throws for a referenced column that's missing).
+  // No exception, no warning, just quietly wrong data after the preceding
+  // DELETE had already destroyed the previous rows.
+  test('a row with fewer keys than a later row in the same table does not corrupt the later row', () => {
+    overwriteFromSnapshot(db, {
+      categories: [
+        { id: 'c5', name: 'Прочее' },
+        { id: 'c6', name: 'Кино', emoji: '🎬', parentId: null, archived: true },
+      ],
+      transactions: [], budgetRates: [], debts: [], debtPayments: [],
+    });
+    const result = dumpToSnapshot(db);
+    assert.deepEqual(result.categories.find((c) => c.id === 'c6'), {
+      id: 'c6', name: 'Кино', emoji: '🎬', parentId: null, archived: true,
+    });
+    // The shorter row's omitted fields should degrade to sane defaults
+    // (null / false), not crash and not silently reuse another row's values.
+    assert.deepEqual(result.categories.find((c) => c.id === 'c5'), {
+      id: 'c5', name: 'Прочее', emoji: null, parentId: null, archived: false,
+    });
+  });
 });

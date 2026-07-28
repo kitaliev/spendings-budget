@@ -5727,11 +5727,12 @@ Per spec §9 and the "explicitly out of scope" note in §14/§15: Phase 1 has no
 ```js
 // src/components/settings/SettingsScreen.spec.js
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import SettingsScreen from './SettingsScreen.vue';
 import { useBudgetRatesStore } from '../../stores/budgetRates.js';
 import { useCategoriesStore } from '../../stores/categories.js';
+import { useToastStore } from '../../stores/toast.js';
 import * as ratesDb from '../../db/budgetRates.js';
 
 vi.mock('../../db/budgetRates.js');
@@ -5761,8 +5762,37 @@ describe('SettingsScreen — daily budget row', () => {
     await wrapper.find('.settings-row__value').trigger('click');
     await wrapper.find('.settings-row__rate-input').setValue('3000');
     await wrapper.find('.settings-row__rate-form').trigger('submit');
+    // saveRate -> budgetRatesStore.setRate is two awaits deep (addRate, then
+    // listRates) before editingRate resets — same shape as DebtsScreen's
+    // submitAdd chain, where a single trigger()-implied nextTick() doesn't
+    // reliably drain it.
+    await flushPromises();
     expect(wrapper.find('.settings-row__value').text()).toContain('3 000 ₽');
     expect(wrapper.find('.settings-row__rate-input').exists()).toBe(false);
+  });
+
+  it('rejects an amount of zero, showing a toast without touching the store', async () => {
+    const wrapper = mount(SettingsScreen);
+    await wrapper.find('.settings-row__value').trigger('click');
+    await wrapper.find('.settings-row__rate-input').setValue('0');
+    await wrapper.find('.settings-row__rate-form').trigger('submit');
+    expect(useToastStore().message).toBe('Сумма должна быть больше нуля');
+    expect(ratesDb.addRate).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second submit while the first rate save is still in flight', async () => {
+    let resolveAddRate;
+    ratesDb.addRate.mockReturnValue(new Promise((resolve) => { resolveAddRate = resolve; }));
+    ratesDb.listRates.mockResolvedValue([{ id: 'r2', amount: 3000, effectiveFrom: '2026-07-27' }]);
+    const wrapper = mount(SettingsScreen);
+    await wrapper.find('.settings-row__value').trigger('click');
+    await wrapper.find('.settings-row__rate-input').setValue('3000');
+    const form = wrapper.find('.settings-row__rate-form');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolveAddRate({ id: 'r2', amount: 3000, effectiveFrom: '2026-07-27' });
+    await flushPromises();
+    expect(ratesDb.addRate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -5793,11 +5823,20 @@ Expected: FAIL — module `./SettingsScreen.vue` does not exist.
         <div class="settings-row">
           <span class="settings-row__label">Дневной бюджет</span>
           <form v-if="editingRate" class="settings-row__rate-form" @submit.prevent="saveRate">
-            <input v-model="rateInput" type="number" inputmode="decimal" class="settings-row__rate-input" />
+            <input
+              v-model="rateInput"
+              type="number"
+              inputmode="decimal"
+              min="1"
+              step="1"
+              placeholder="Сумма"
+              aria-label="Дневной бюджет"
+              class="settings-row__rate-input"
+            />
             <button type="submit" class="settings-row__rate-save">Сохранить</button>
           </form>
           <button v-else type="button" class="settings-row__value" @click="startEditingRate">
-            {{ formatMoney(budgetRatesStore.currentRate) }} <span>›</span>
+            {{ formatMoney(budgetRatesStore.currentRate) }} <span aria-hidden="true">›</span>
           </button>
         </div>
       </div>
@@ -5862,6 +5901,14 @@ export default {
 </script>
 
 <style lang="scss">
+// TopBar's own padding (6px 2px 14px) isn't enough alone to keep content off
+// the physical screen edges — the same gap already found and fixed in
+// BudgetDashboard and DebtsScreen's root, confirmed here too by rendering at
+// a real 390px viewport (.settings-list sat flush against both edges).
+.settings-screen {
+  padding: 0 18px;
+}
+
 .settings-group {
   margin-bottom: 22px;
 
@@ -5922,6 +5969,17 @@ export default {
     padding: 6px 8px;
     font-family: var(--font-money);
     font-size: 14px;
+    // Same rule as DebtCard's __pay-input and DebtsScreen's __add-amount —
+    // every numeric-ish input in this app is either fully custom or visually
+    // hidden; a bare spinner here would be the one unstyled system control
+    // left in the UI.
+    appearance: textfield;
+
+    &::-webkit-outer-spin-button,
+    &::-webkit-inner-spin-button {
+      appearance: none;
+      margin: 0;
+    }
   }
 
   &__rate-save {
@@ -5939,7 +5997,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/settings/SettingsScreen.spec.js`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -5947,6 +6005,17 @@ Expected: PASS (4 tests).
 git add src/components/settings/SettingsScreen.vue src/components/settings/SettingsScreen.spec.js
 git commit -m "feat: add SettingsScreen"
 ```
+
+**Note added during spec-compliance review:** two of the six tests above (`rejects an amount of zero...` and `ignores a second submit...`) didn't exist in the initial implementation — the reviewer proved, by temporarily deleting the `submitting` guard and separately the `parsePositiveAmount`/toast validation in `saveRate`, that the original 4 tests caught neither regression. Added in a follow-up commit `test: cover SettingsScreen's double-submit guard and invalid-input rejection`, matching the equivalent tests already established in `DebtCard.spec.js`/`DebtsScreen.spec.js`.
+
+**Note added during code-quality review:** three issues were found and fixed after the above was implemented, all reflected in the code blocks above:
+- **Critical:** `.settings-screen` had no padding rule at all — `.settings-list` sat flush against both screen edges (measured 0px gutter in a real 390px-wide render). Fixed with the same `padding: 0 18px` rule already used on `BudgetDashboard`/`DebtsScreen`'s roots.
+- **Important:** the rate `<input>` had no accessible name (no `<label for>`, no `aria-label`) and none of the conventions every other numeric input in this app already has (`placeholder`, `min`/`step`, spinner-hiding CSS) — fixed with `aria-label="Дневной бюджет"`, `placeholder="Сумма"`, `min="1" step="1"`, and the same `appearance: textfield` + spin-button-hiding rule as `DebtCard`'s `__pay-input`/`DebtsScreen`'s `__add-amount`.
+- **Important:** the decorative `<span>›</span>` next to the rate value wasn't `aria-hidden`, unlike the identical pattern in `DebtsScreen`'s closed-toggle and `CategoryPie`'s back button — a screen reader would announce the raw glyph as part of the button's name. Fixed with `aria-hidden="true"`.
+
+All three were verified empirically via Puppeteer (an 18px gutter measured on both sides; the button's accessible name confirmed to exclude the chevron once `aria-hidden` was added; `aria-label`/`placeholder` presence and `appearance: textfield` confirmed via `getComputedStyle`).
+
+Two further items were raised and independently verified, but judged pre-existing/cross-cutting rather than this task's responsibility (not fixed here): `--ink-muted` text fails WCAG AA contrast (~3.5:1) against both `--surface` and `--ground` in both themes — already true in at least 9 other already-shipped locations across 7+ components, including `CategoryPie__title`'s byte-for-byte-identical style, so it's a systemic token-level issue, not something this component introduced; and focus is dropped to `<body>` after a successful save (the focused submit button is removed from the DOM by the `v-if`/`v-else` swap) — the same unaddressed shape already exists in `DebtsScreen.submitAdd`. Both are candidates for a dedicated cross-cutting cleanup pass, flagged for the final whole-implementation review rather than fixed piecemeal per-task.
 
 ---
 

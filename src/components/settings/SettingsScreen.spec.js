@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from 'pinia';
 import SettingsScreen from './SettingsScreen.vue';
 import { useBudgetRatesStore } from '../../stores/budgetRates.js';
 import { useCategoriesStore } from '../../stores/categories.js';
+import { useToastStore } from '../../stores/toast.js';
 import * as ratesDb from '../../db/budgetRates.js';
 
 vi.mock('../../db/budgetRates.js');
@@ -40,6 +41,30 @@ describe('SettingsScreen — daily budget row', () => {
     await flushPromises();
     expect(wrapper.find('.settings-row__value').text()).toContain('3 000 ₽');
     expect(wrapper.find('.settings-row__rate-input').exists()).toBe(false);
+  });
+
+  it('rejects an amount of zero, showing a toast without touching the store', async () => {
+    const wrapper = mount(SettingsScreen);
+    await wrapper.find('.settings-row__value').trigger('click');
+    await wrapper.find('.settings-row__rate-input').setValue('0');
+    await wrapper.find('.settings-row__rate-form').trigger('submit');
+    expect(useToastStore().message).toBe('Сумма должна быть больше нуля');
+    expect(ratesDb.addRate).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second submit while the first rate save is still in flight', async () => {
+    let resolveAddRate;
+    ratesDb.addRate.mockReturnValue(new Promise((resolve) => { resolveAddRate = resolve; }));
+    ratesDb.listRates.mockResolvedValue([{ id: 'r2', amount: 3000, effectiveFrom: '2026-07-27' }]);
+    const wrapper = mount(SettingsScreen);
+    await wrapper.find('.settings-row__value').trigger('click');
+    await wrapper.find('.settings-row__rate-input').setValue('3000');
+    const form = wrapper.find('.settings-row__rate-form');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolveAddRate({ id: 'r2', amount: 3000, effectiveFrom: '2026-07-27' });
+    await flushPromises();
+    expect(ratesDb.addRate).toHaveBeenCalledTimes(1);
   });
 });
 

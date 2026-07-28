@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useCategoriesStore } from './categories.js';
 import * as categoriesDb from '../db/categories.js';
+import * as transactionsDb from '../db/transactions.js';
 
 vi.mock('../db/categories.js');
+vi.mock('../db/transactions.js');
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -86,10 +88,22 @@ describe('useCategoriesStore.remove', () => {
   it('delegates to the db layer and reloads', async () => {
     categoriesDb.listCategories.mockResolvedValue([]);
     categoriesDb.deleteCategory.mockResolvedValue(undefined);
+    transactionsDb.listTransactions.mockResolvedValue([]);
     const store = useCategoriesStore();
     await store.remove('1');
     expect(categoriesDb.deleteCategory).toHaveBeenCalledWith('1');
     expect(categoriesDb.listCategories).toHaveBeenCalled();
+  });
+
+  it('also reloads the transactions store, since deleteCategory cascades to its transactions in the same db transaction', async () => {
+    categoriesDb.listCategories.mockResolvedValue([]);
+    categoriesDb.deleteCategory.mockResolvedValue(undefined);
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    const store = useCategoriesStore();
+    await store.remove('1');
+    // Without this, budgetStore's totals (which sum transactionsStore.items
+    // directly) would keep counting the just-deleted transactions.
+    expect(transactionsDb.listTransactions).toHaveBeenCalled();
   });
 });
 

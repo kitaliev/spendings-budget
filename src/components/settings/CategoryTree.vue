@@ -4,7 +4,7 @@
       v-for="row in rows"
       :key="row.category.id"
       class="tree-row"
-      :class="{ 'tree-row--sub': row.depth > 0, 'tree-row--revealed': revealedId === row.category.id }"
+      :class="{ 'tree-row--revealed': revealedId === row.category.id }"
       :style="{ paddingLeft: 14 + row.depth * 24 + 'px' }"
     >
       <span class="tree-row__emoji">{{ row.category.emoji }}</span>
@@ -16,7 +16,13 @@
         :aria-expanded="revealedId === row.category.id ? 'true' : 'false'"
         @click="toggleRevealed(row.category.id)"
       >⋯</button>
-      <div class="tree-row__actions">
+      <!-- transform: translateX(100%) (below) only moves this box visually
+           — it stays focusable, tabbable, and hit-testable even while off
+           the visible row (a well-known off-canvas pitfall), which would
+           let ordinary Tab navigation reach and activate an unconfirmed,
+           effectively-irreversible Archive on every row. inert removes it
+           from focus/tab order/hit-testing entirely while hidden. -->
+      <div class="tree-row__actions" :inert="revealedId !== row.category.id">
         <button type="button" class="tree-row__action tree-row__action--archive" @click="archive(row.category.id)">Архив</button>
         <button type="button" class="tree-row__action tree-row__action--delete" @click="confirmDelete(row.category)">Удалить</button>
       </div>
@@ -28,12 +34,15 @@
 import { useCategoriesStore } from '../../stores/categories.js';
 import { useTransactionsStore } from '../../stores/transactions.js';
 
-function flattenTree(categories, parentId, depth) {
+// Takes childrenOf itself (a bound function), not a raw array to re-filter
+// — childrenOf already IS "categories with this parentId," so refiltering
+// a raw array here would just be a second, driftable copy of that same
+// logic with an extra depth counter layered on top.
+function flattenTree(childrenOf, parentId, depth) {
   const result = [];
-  const children = categories.filter((c) => c.parentId === parentId);
-  for (const child of children) {
+  for (const child of childrenOf(parentId)) {
     result.push({ category: child, depth });
-    result.push(...flattenTree(categories, child.id, depth + 1));
+    result.push(...flattenTree(childrenOf, child.id, depth + 1));
   }
   return result;
 }
@@ -70,7 +79,7 @@ export default {
       return useTransactionsStore();
     },
     rows() {
-      return flattenTree(this.categoriesStore.active, null, 0);
+      return flattenTree(this.categoriesStore.childrenOf, null, 0);
     },
   },
   methods: {
@@ -170,11 +179,21 @@ export default {
     color: #fff;
 
     &--archive {
-      background: #8a8f73;
+      // #8a8f73 (this chip's original color) only reaches 3.36:1 against
+      // this white text — below the 4.5:1 WCAG AA minimum for this size/
+      // weight. Darkened within the same olive family to 7.38:1.
+      background: #54583f;
     }
 
     &--delete {
-      background: var(--negative);
+      // Not var(--negative): that token is tuned as a *foreground* ink
+      // color (used elsewhere for text/icons on the app's own surface),
+      // with a dark-mode value intentionally lightened for legibility
+      // there — which is the opposite of what a solid fill behind white
+      // text needs (it fails contrast, 3.04:1, in dark mode). Fixed
+      // regardless of theme instead, like a dedicated destructive-action
+      // chip color: 6.08:1 against white.
+      background: #a8412b;
     }
   }
 }

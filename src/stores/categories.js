@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import * as categoriesDb from '../db/categories.js';
+import { useTransactionsStore } from './transactions.js';
 
 export const useCategoriesStore = defineStore('categories', {
   state: () => ({
@@ -47,8 +48,16 @@ export const useCategoriesStore = defineStore('categories', {
       this.items = await categoriesDb.listCategories();
     },
     async remove(id) {
+      // deleteCategory cascades to every transaction belonging to id's
+      // whole subtree, in the same IndexedDB transaction (db/categories.js)
+      // — but that's invisible to transactionsStore's own in-memory items
+      // unless reloaded here too. Without this, budgetStore.spendForMonth/
+      // availableForMonth (which sum transactionsStore.items directly, with
+      // no check for whether a transaction's category still exists) would
+      // keep counting the deleted transactions until an unrelated reload.
       await categoriesDb.deleteCategory(id);
       this.items = await categoriesDb.listCategories();
+      await useTransactionsStore().load();
     },
   },
 });

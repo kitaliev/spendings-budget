@@ -98,7 +98,15 @@ export default {
     },
   },
   async mounted() {
-    await this.backupStore.checkStatus();
+    try {
+      await this.backupStore.checkStatus();
+    } catch {
+      // Backup server unreachable (offline, DNS failure, server down, etc.)
+      // — the login form still renders correctly via the template's own
+      // v-else fallback regardless (backupStore.loggedIn stays null/falsy),
+      // this just prevents an unhandled rejection on every Settings open
+      // when the server can't be reached.
+    }
   },
   methods: {
     formatMoney,

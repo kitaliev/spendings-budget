@@ -149,4 +149,11 @@ describe('SettingsScreen — Резервная копия', () => {
     await flushPromises();
     expect(backupApi.login).toHaveBeenCalledTimes(1);
   });
+
+  it('still shows the login form (not a broken state) when checking status fails, e.g. the server is unreachable', async () => {
+    backupApi.status.mockRejectedValue(new Error('network error'));
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    expect(wrapper.find('.settings-row__backup-login').exists()).toBe(true);
+  });
 });

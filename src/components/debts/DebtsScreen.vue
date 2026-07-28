@@ -81,8 +81,9 @@ export default {
     // min-height + flex-centering, not just padding — 8px vertical padding
     // plus a 13.5px line-height lands well under the 44px touch-target
     // minimum (the same emergent-height gap already found and fixed on
-    // MonthChart's columns, BudgetDashboard's settings button, and
-    // DebtCard's top row).
+    // TabBar's items, BudgetDashboard's settings button, and DebtCard's
+    // top row — MonthChart's own bug was a different shape, a button's UA
+    // padding shrinking a percentage-width child, not a height shortfall).
     min-height: 44px;
     display: flex;
     align-items: center;

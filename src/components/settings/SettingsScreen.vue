@@ -31,6 +31,26 @@
       <p class="settings-group__title">Категории</p>
       <CategoryTree />
     </div>
+
+    <div class="settings-group">
+      <p class="settings-group__title">Резервная копия</p>
+      <div class="settings-list">
+        <div v-if="backupStore.loggedIn" class="settings-row">
+          <span class="settings-row__label">Статус</span>
+          <span class="settings-row__backup-status">{{ syncStatusText }}</span>
+        </div>
+        <form v-else class="settings-row settings-row__backup-login" @submit.prevent="submitLogin">
+          <input
+            v-model="backupPassword"
+            type="password"
+            placeholder="Пароль"
+            aria-label="Пароль от резервной копии"
+            class="settings-row__backup-password"
+          />
+          <button type="submit" class="settings-row__backup-submit">Войти</button>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -39,6 +59,7 @@ import TopBar from '../layout/TopBar.vue';
 import CategoryTree from './CategoryTree.vue';
 import { ChevronRight } from '@lucide/vue';
 import { useBudgetRatesStore } from '../../stores/budgetRates.js';
+import { useBackupStore } from '../../stores/backup.js';
 import { useToastStore } from '../../stores/toast.js';
 import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 
@@ -54,12 +75,30 @@ export default {
       // addRate() call, and a double-tap on Сохранить would otherwise
       // create two rate segments for the same date.
       submitting: false,
+      backupPassword: '',
     };
   },
   computed: {
     budgetRatesStore() {
       return useBudgetRatesStore();
     },
+    backupStore() {
+      return useBackupStore();
+    },
+    syncStatusText() {
+      const { lastSyncAt, lastSyncOk } = this.backupStore;
+      if (lastSyncAt === null) return 'Ещё не синхронизировалось';
+      const when = new Date(lastSyncAt).toLocaleString('ru-RU', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      return lastSyncOk ? `Синхронизировано: ${when}` : `Ошибка синхронизации: ${when}`;
+    },
+  },
+  async mounted() {
+    await this.backupStore.checkStatus();
   },
   methods: {
     formatMoney,
@@ -80,6 +119,15 @@ export default {
         this.editingRate = false;
       } finally {
         this.submitting = false;
+      }
+    },
+    async submitLogin() {
+      if (this.backupStore.submitting) return;
+      try {
+        await this.backupStore.login(this.backupPassword);
+        this.backupPassword = '';
+      } catch (err) {
+        useToastStore().show(err.message);
       }
     },
   },
@@ -166,6 +214,32 @@ export default {
     color: var(--accent-strong);
     font-weight: 600;
     font-size: 13px;
+  }
+
+  &__backup-login {
+    gap: 8px;
+  }
+
+  &__backup-password {
+    flex: 1;
+    min-height: 44px;
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 0 10px;
+    font-size: 14.5px;
+  }
+
+  &__backup-submit {
+    min-height: 44px;
+    padding: 0 14px;
+    color: var(--accent-strong);
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  &__backup-status {
+    font-size: 14px;
+    color: var(--ink-muted);
   }
 }
 </style>

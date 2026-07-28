@@ -5,14 +5,18 @@ import SettingsScreen from './SettingsScreen.vue';
 import { useBudgetRatesStore } from '../../stores/budgetRates.js';
 import { useCategoriesStore } from '../../stores/categories.js';
 import { useToastStore } from '../../stores/toast.js';
+import { useBackupStore } from '../../stores/backup.js';
 import * as ratesDb from '../../db/budgetRates.js';
+import * as backupApi from '../../api/backup.js';
 
 vi.mock('../../db/budgetRates.js');
+vi.mock('../../api/backup.js');
 
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
   useBudgetRatesStore().segments = [{ amount: 2500, effectiveFrom: '2026-01-01' }];
+  backupApi.status.mockResolvedValue({ loggedIn: false });
 });
 
 describe('SettingsScreen — daily budget row', () => {
@@ -73,5 +77,76 @@ describe('SettingsScreen — category management', () => {
     useCategoriesStore().items = [{ id: 'food', name: 'Еда', emoji: '🍔', parentId: null, archived: false }];
     const wrapper = mount(SettingsScreen);
     expect(wrapper.find('.tree-row__name').text()).toBe('Еда');
+  });
+});
+
+describe('SettingsScreen — Резервная копия', () => {
+  it('shows a login form when there is no active session', async () => {
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    expect(wrapper.find('.settings-row__backup-login').exists()).toBe(true);
+  });
+
+  it('logs in and switches to the status view on success', async () => {
+    backupApi.login.mockResolvedValue({ ok: true });
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    await wrapper.find('.settings-row__backup-password').setValue('hunter2');
+    await wrapper.find('.settings-row__backup-login').trigger('submit');
+    await flushPromises();
+    expect(wrapper.find('.settings-row__backup-login').exists()).toBe(false);
+    expect(wrapper.find('.settings-row__backup-status').exists()).toBe(true);
+  });
+
+  it('shows a toast and stays on the login form when login fails', async () => {
+    backupApi.login.mockRejectedValue(new Error('Неверный пароль'));
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    await wrapper.find('.settings-row__backup-password').setValue('wrong');
+    await wrapper.find('.settings-row__backup-login').trigger('submit');
+    await flushPromises();
+    expect(useToastStore().message).toBe('Неверный пароль');
+    expect(wrapper.find('.settings-row__backup-login').exists()).toBe(true);
+  });
+
+  it('shows "not yet synced" status when already logged in but nothing has synced yet', async () => {
+    backupApi.status.mockResolvedValue({ loggedIn: true });
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    expect(wrapper.find('.settings-row__backup-status').text()).toBe('Ещё не синхронизировалось');
+  });
+
+  it('shows a successful sync timestamp when logged in and synced', async () => {
+    backupApi.status.mockResolvedValue({ loggedIn: true });
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    useBackupStore().lastSyncAt = '2026-07-28T10:00:00.000Z';
+    useBackupStore().lastSyncOk = true;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.settings-row__backup-status').text()).toContain('Синхронизировано');
+  });
+
+  it('shows a sync-error status distinctly from a successful one', async () => {
+    backupApi.status.mockResolvedValue({ loggedIn: true });
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    useBackupStore().lastSyncAt = '2026-07-28T10:00:00.000Z';
+    useBackupStore().lastSyncOk = false;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.settings-row__backup-status').text()).toContain('Ошибка синхронизации');
+  });
+
+  it('ignores a second login submit while the first is still in flight', async () => {
+    let resolveLogin;
+    backupApi.login.mockReturnValue(new Promise((r) => { resolveLogin = r; }));
+    const wrapper = mount(SettingsScreen);
+    await flushPromises();
+    await wrapper.find('.settings-row__backup-password').setValue('hunter2');
+    const form = wrapper.find('.settings-row__backup-login');
+    await form.trigger('submit');
+    await form.trigger('submit');
+    resolveLogin({ ok: true });
+    await flushPromises();
+    expect(backupApi.login).toHaveBeenCalledTimes(1);
   });
 });

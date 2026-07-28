@@ -7,6 +7,12 @@ body {
   background: var(--ground);
   color: var(--ink);
   font-family: var(--font-ui);
+  // Applied globally rather than repeated on each of the ~8 places using
+  // --font-money: Inter (a proportional font, unlike the monospace it
+  // replaced) needs this for digits to line up in columns/lists, and it's
+  // a no-op everywhere else (only affects how digits are spaced, nothing
+  // else) — cheaper than adding the same declaration to every consumer.
+  font-variant-numeric: tabular-nums;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }

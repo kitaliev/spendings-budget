@@ -5,7 +5,9 @@
         <MonthNav :label="monthLabel" :can-go-next="canGoNext" @prev="prevMonth" @next="nextMonth" />
       </template>
       <template #right>
-        <button type="button" class="budget-dashboard__settings" aria-label="Настройки" @click="$emit('open-settings')">⚙️</button>
+        <button type="button" class="budget-dashboard__settings" aria-label="Настройки" @click="$emit('open-settings')">
+          <Settings :size="17" />
+        </button>
       </template>
     </TopBar>
 
@@ -36,6 +38,7 @@ import MonthNav from '../layout/MonthNav.vue';
 import MonthChart from './MonthChart.vue';
 import CategoryPie from './CategoryPie.vue';
 import TransactionList from './TransactionList.vue';
+import { Settings } from '@lucide/vue';
 import { useBudgetStore } from '../../stores/budget.js';
 import { formatMoney } from '../../utils/currency.js';
 import { todayKey, toMonthKey, monthNameWithYear } from '../../utils/date.js';
@@ -63,7 +66,7 @@ function shiftMonth(monthKey, delta) {
 
 export default {
   name: 'BudgetDashboard',
-  components: { TopBar, MonthNav, MonthChart, CategoryPie, TransactionList },
+  components: { TopBar, MonthNav, MonthChart, CategoryPie, TransactionList, Settings },
   // No store .load() call anywhere in this file, on purpose: screen-level
   // components only read reactive state that App.vue already loaded once at
   // startup. Keeps loading in one place and lets this component's own tests
@@ -167,7 +170,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 15px;
+    color: var(--ink-secondary);
 
     // Visual circle stays 34px per design, but the tappable area is widened
     // to the 44px accessible touch-target minimum via an invisible hit area,

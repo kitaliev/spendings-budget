@@ -1,7 +1,9 @@
 <template>
   <div class="category-tree">
     <button type="button" class="category-tree__add-toggle" @click="toggleAddForm">
-      {{ addingOpen ? '‹ Отмена' : '+ Добавить категорию' }}
+      <ChevronLeft v-if="addingOpen" :size="16" />
+      <Plus v-else :size="16" />
+      {{ addingOpen ? 'Отмена' : 'Добавить категорию' }}
     </button>
 
     <form v-if="addingOpen" class="category-tree__add-form" @submit.prevent="submitAdd">
@@ -31,7 +33,7 @@
         aria-label="Действия"
         :aria-expanded="revealedId === row.category.id ? 'true' : 'false'"
         @click="toggleRevealed(row.category.id)"
-      >⋯</button>
+      ><Ellipsis :size="18" /></button>
       <!-- transform: translateX(100%) (below) only moves this box visually
            — it stays focusable, tabbable, and hit-testable even while off
            the visible row (a well-known off-canvas pitfall), which would
@@ -47,6 +49,7 @@
 </template>
 
 <script>
+import { ChevronLeft, Plus, Ellipsis } from '@lucide/vue';
 import { useCategoriesStore } from '../../stores/categories.js';
 import { useTransactionsStore } from '../../stores/transactions.js';
 import { useToastStore } from '../../stores/toast.js';
@@ -83,6 +86,7 @@ function subtreeIds(categories, rootId) {
 
 export default {
   name: 'CategoryTree',
+  components: { ChevronLeft, Plus, Ellipsis },
   data() {
     return {
       revealedId: null,
@@ -195,6 +199,7 @@ export default {
     min-height: 44px;
     display: flex;
     align-items: center;
+    gap: 6px;
     width: 100%;
     text-align: left;
     padding: 0 14px;

@@ -6,7 +6,7 @@
       :disabled="!canGoPrev"
       aria-label="Предыдущий месяц"
       @click="$emit('prev')"
-    >‹</button>
+    ><ChevronLeft :size="18" /></button>
     <span class="month-nav__label" aria-live="polite" aria-atomic="true">{{ label }}</span>
     <button
       type="button"
@@ -14,13 +14,16 @@
       :disabled="!canGoNext"
       aria-label="Следующий месяц"
       @click="$emit('next')"
-    >›</button>
+    ><ChevronRight :size="18" /></button>
   </div>
 </template>
 
 <script>
+import { ChevronLeft, ChevronRight } from '@lucide/vue';
+
 export default {
   name: 'MonthNav',
+  components: { ChevronLeft, ChevronRight },
   props: {
     label: {
       type: String,

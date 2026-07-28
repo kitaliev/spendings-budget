@@ -26,7 +26,33 @@ describe('ExpenseModal — adding a new expense', () => {
     for (const key of ['1', '2', '4', '0']) {
       await findKey(wrapper, key).trigger('click');
     }
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('1240');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('1240');
+  });
+
+  it('shows the live computed total, formatted as money, above the typed expression', async () => {
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    for (const key of ['1', '0', '0', '0', '+', '5', '0', '0']) {
+      await findKey(wrapper, key).trigger('click');
+    }
+    expect(wrapper.find('.expense-modal__entry-total').text()).toBe('1 500 ₽');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('1000+500');
+  });
+
+  it('freezes the computed total at the last complete result while an operator is left dangling mid-entry', async () => {
+    // evaluateExpression drops a trailing operator with nothing after it
+    // rather than throwing — "1000+" reads as plain 1000, so the total
+    // shown above doesn't flicker to 0 or an error the instant + is tapped.
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    for (const key of ['1', '0', '0', '0', '+']) {
+      await findKey(wrapper, key).trigger('click');
+    }
+    expect(wrapper.find('.expense-modal__entry-total').text()).toBe('1 000 ₽');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('1000+');
+  });
+
+  it('shows 0 ₽ for the total before anything is typed', () => {
+    const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
+    expect(wrapper.find('.expense-modal__entry-total').text()).toBe('0 ₽');
   });
 
   it('commits the evaluated amount when a leaf category is tapped', async () => {
@@ -58,7 +84,7 @@ describe('ExpenseModal — adding a new expense', () => {
     await findKey(wrapper, '5').trigger('click');
     await findKey(wrapper, '+').trigger('click');
     await findKey(wrapper, '×').trigger('click');
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5×');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('5×');
   });
 
   it('does nothing when a category is tapped with no amount entered', async () => {
@@ -75,7 +101,7 @@ describe('ExpenseModal — adding a new expense', () => {
     for (const key of ['5', '−', '1', '0']) await findKey(wrapper, key).trigger('click');
     await wrapper.find('.category-picker__row').trigger('click');
     expect(transactionsDb.createTransaction).not.toHaveBeenCalled();
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5−10'); // left as typed, not silently cleared
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('5−10'); // left as typed, not silently cleared
   });
 
   it('resets the amount after a successful commit and stays open', async () => {
@@ -88,7 +114,7 @@ describe('ExpenseModal — adding a new expense', () => {
     // $nextTick() doesn't reliably drain that; flushPromises() (a macrotask)
     // does, same as the "ignores a second tap" case below.
     await flushPromises();
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('0');
     expect(wrapper.emitted('close')).toBeUndefined();
   });
 
@@ -116,10 +142,10 @@ describe('ExpenseModal — adding a new expense', () => {
     await findKey(wrapper, '5').trigger('click');
     await wrapper.find('.category-picker__row').trigger('click'); // commit in flight
     await findKey(wrapper, '7').trigger('click'); // typing during the gap — must be a no-op
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('5');
     resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
     await flushPromises();
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0'); // clean reset, no leftover "7"
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('0'); // clean reset, no leftover "7"
   });
 });
 
@@ -137,7 +163,7 @@ describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent 
     resolveCreate({ id: 't1', amount: 5, date: '2026-07-27', categoryId: 'fun' });
     await flushPromises();
     // The now-active edit session's pre-filled amount must survive untouched.
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('300');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('300');
   });
 
   it('does not crash resolving a commit after the sheet was closed mid-write', async () => {
@@ -180,12 +206,12 @@ describe('ExpenseModal — stale in-flight writes (App.vue keeps one persistent 
     // cycle, which is what the fix under test reacts to instead.
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction: null } });
     await findKey(wrapper, '5').trigger('click');
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('5');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('5');
 
     await wrapper.setProps({ visible: false }); // closed without picking a category
     await wrapper.setProps({ visible: true }); // reopened via the FAB
 
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('0');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('0');
     expect(wrapper.vm.date).toBe(todayKey());
   });
 });
@@ -195,7 +221,7 @@ describe('ExpenseModal — editing an existing expense', () => {
 
   it('pre-fills the amount from the transaction being edited', () => {
     const wrapper = mount(ExpenseModal, { props: { visible: true, editingTransaction } });
-    expect(wrapper.find('.expense-modal__entry-value').text()).toBe('750');
+    expect(wrapper.find('.expense-modal__entry-expression').text()).toBe('750');
   });
 
   it('shows a Delete button that removes the transaction and closes', async () => {

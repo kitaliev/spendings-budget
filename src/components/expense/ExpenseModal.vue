@@ -4,12 +4,17 @@
     <div class="expense-modal__sheet">
       <div class="expense-modal__handle-row">
         <div class="expense-modal__handle"></div>
-        <button type="button" class="expense-modal__close" aria-label="Закрыть" @click="close">✕</button>
+        <button type="button" class="expense-modal__close" aria-label="Закрыть" @click="close"><X :size="15" /></button>
       </div>
 
       <div class="expense-modal__entry">
         <p id="expense-modal-title" class="expense-modal__entry-label">Сумма расхода</p>
-        <div class="expense-modal__entry-value">{{ raw || '0' }}</div>
+        <div class="expense-modal__entry-total">{{ formatMoney(computedTotal) }}</div>
+        <!-- The raw calculator expression itself (e.g. "1000+500") — kept
+             visible but secondary, so a multi-step calculation is still
+             checkable, while the computed result above is what's about to
+             actually get saved. -->
+        <div class="expense-modal__entry-expression">{{ raw || '0' }}</div>
       </div>
 
       <DatePicker v-model="date" />
@@ -27,6 +32,7 @@
 import Keypad from './Keypad.vue';
 import DatePicker from './DatePicker.vue';
 import CategoryPicker from './CategoryPicker.vue';
+import { X } from '@lucide/vue';
 import { useTransactionsStore } from '../../stores/transactions.js';
 import { useToastStore } from '../../stores/toast.js';
 import { evaluateExpression } from '../../utils/calculator.js';
@@ -35,7 +41,7 @@ import { todayKey } from '../../utils/date.js';
 
 export default {
   name: 'ExpenseModal',
-  components: { Keypad, DatePicker, CategoryPicker },
+  components: { Keypad, DatePicker, CategoryPicker, X },
   props: {
     visible: {
       type: Boolean,
@@ -58,6 +64,17 @@ export default {
       // (or deleting) the same transaction twice.
       submitting: false,
     };
+  },
+  computed: {
+    // evaluateExpression never throws and already drops a trailing/dangling
+    // operator (see calculator.js's own docstring) rather than leaving the
+    // sub-expression before it unevaluated — so a plain, un-cached computed
+    // over raw already shows "the last complete result" while the user is
+    // mid-expression (e.g. "1000+" reads as 1000 here), with no extra
+    // state or watcher needed to get that freezing behavior.
+    computedTotal() {
+      return evaluateExpression(this.raw);
+    },
   },
   watch: {
     editingTransaction: {
@@ -88,6 +105,7 @@ export default {
     },
   },
   methods: {
+    formatMoney,
     onKey(key) {
       // A write started by a previous commit/delete can still be in flight
       // (see commit()/onDelete()) with nothing else in the UI disabled
@@ -278,12 +296,23 @@ export default {
     margin-bottom: 8px;
   }
 
-  &__entry-value {
+  &__entry-total {
     font-family: var(--font-money);
     font-size: 40px;
     font-weight: 600;
     letter-spacing: -0.01em;
     min-height: 48px;
+  }
+
+  // The typed expression itself (e.g. "1000+500") — secondary to the
+  // computed total above it, so sized well down from the old single
+  // 40px display this replaces.
+  &__entry-expression {
+    font-family: var(--font-money);
+    font-size: 15px;
+    color: var(--ink-muted);
+    min-height: 19px;
+    margin-top: 2px;
   }
 
   &__delete {

@@ -2,7 +2,7 @@
   <div class="category-pie">
     <p class="category-pie__title">{{ stack.length ? 'Подкатегории' : 'Расход по категориям' }}</p>
     <button v-if="stack.length" type="button" class="category-pie__back" @click="back">
-      <span aria-hidden="true">‹</span> Назад ко всем категориям
+      <ChevronLeft aria-hidden="true" :size="16" /> Назад ко всем категориям
     </button>
 
     <!-- Every amount/percentage on this chart is already in the legend below
@@ -31,6 +31,7 @@
 </template>
 
 <script>
+import { ChevronLeft } from '@lucide/vue';
 import { useCategoriesStore } from '../../stores/categories.js';
 import { useTransactionsStore } from '../../stores/transactions.js';
 import { formatMoney } from '../../utils/currency.js';
@@ -39,6 +40,7 @@ const PALETTE = ['var(--cat-1)', 'var(--cat-2)', 'var(--cat-3)', 'var(--cat-4)',
 
 export default {
   name: 'CategoryPie',
+  components: { ChevronLeft },
   props: {
     monthKey: {
       type: String,

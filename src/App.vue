@@ -24,7 +24,9 @@
 
     <template v-if="showSettings">
       <SettingsScreen class="app-shell__settings-overlay" />
-      <button type="button" class="app-shell__settings-close" aria-label="Закрыть настройки" @click="showSettings = false">✕</button>
+      <button type="button" class="app-shell__settings-close" aria-label="Закрыть настройки" @click="showSettings = false">
+        <X :size="16" />
+      </button>
     </template>
 
     <ExpenseModal
@@ -42,6 +44,7 @@ import SettingsScreen from './components/settings/SettingsScreen.vue';
 import ExpenseModal from './components/expense/ExpenseModal.vue';
 import TabBar from './components/layout/TabBar.vue';
 import Toast from './components/layout/Toast.vue';
+import { X } from '@lucide/vue';
 import { useCategoriesStore } from './stores/categories.js';
 import { useBudgetRatesStore } from './stores/budgetRates.js';
 import { useTransactionsStore } from './stores/transactions.js';
@@ -50,7 +53,7 @@ import { useToastStore } from './stores/toast.js';
 
 export default {
   name: 'App',
-  components: { BudgetDashboard, DebtsScreen, SettingsScreen, ExpenseModal, TabBar, Toast },
+  components: { BudgetDashboard, DebtsScreen, SettingsScreen, ExpenseModal, TabBar, Toast, X },
   data() {
     return {
       // Every store read on screen (dashboard figures, category list, debts)
@@ -86,6 +89,7 @@ export default {
       // toast at least tells the user why the screen came up empty, rather
       // than leaving them to guess. `ready` still flips in `finally` so the
       // app isn't stuck on the loading screen forever.
+      console.error('Store load failed:', err);
       useToastStore().show('Не удалось загрузить данные. Перезапустите приложение.');
     } finally {
       this.ready = true;

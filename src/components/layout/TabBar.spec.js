@@ -3,10 +3,11 @@ import { mount } from '@vue/test-utils';
 import TabBar from './TabBar.vue';
 
 describe('TabBar', () => {
-  it('renders exactly two tabs: Бюджет and Долги', () => {
+  it('renders exactly two tabs: Бюджет and Долги, each with an icon', () => {
     const wrapper = mount(TabBar, { props: { activeTab: 'budget' } });
-    const labels = wrapper.findAll('.tab-bar__item').map((el) => el.text());
-    expect(labels).toEqual(['💰Бюджет', '🤝Долги']);
+    const items = wrapper.findAll('.tab-bar__item');
+    expect(items.map((el) => el.text())).toEqual(['Бюджет', 'Долги']);
+    expect(items.every((el) => el.find('svg').exists())).toBe(true);
   });
 
   it('marks the active tab', () => {

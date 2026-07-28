@@ -9,7 +9,8 @@
           :aria-expanded="addingOpen ? 'true' : 'false'"
           @click="addingOpen = !addingOpen"
         >
-          {{ addingOpen ? '✕' : '+' }}
+          <X v-if="addingOpen" :size="18" />
+          <Plus v-else :size="18" />
         </button>
       </template>
     </TopBar>
@@ -42,7 +43,9 @@
         :aria-expanded="closedOpen ? 'true' : 'false'"
         @click="closedOpen = !closedOpen"
       >
-        <span aria-hidden="true">{{ closedOpen ? '⌄' : '›' }}</span> Закрытые ({{ closedDebts.length }})
+        <ChevronDown v-if="closedOpen" aria-hidden="true" :size="16" />
+        <ChevronRight v-else aria-hidden="true" :size="16" />
+        Закрытые ({{ closedDebts.length }})
       </button>
       <div v-if="closedOpen" class="closed-list">
         <div v-for="debt in closedDebts" :key="debt.id" class="closed-card">
@@ -57,13 +60,14 @@
 <script>
 import TopBar from '../layout/TopBar.vue';
 import DebtCard from './DebtCard.vue';
+import { X, Plus, ChevronDown, ChevronRight } from '@lucide/vue';
 import { useDebtsStore } from '../../stores/debts.js';
 import { useToastStore } from '../../stores/toast.js';
 import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 
 export default {
   name: 'DebtsScreen',
-  components: { TopBar, DebtCard },
+  components: { TopBar, DebtCard, X, Plus, ChevronDown, ChevronRight },
   data() {
     return {
       direction: 'owed_to_me',
@@ -138,7 +142,10 @@ export default {
     border-radius: 50%;
     background: var(--surface);
     border: 1px solid var(--border);
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-secondary);
 
     // Same emergent-height-style gap as BudgetDashboard's own settings
     // gear (34px, already fixed) — this one is smaller (30px) and needs

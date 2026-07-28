@@ -21,7 +21,7 @@
             <button type="submit" class="settings-row__rate-save">Сохранить</button>
           </form>
           <button v-else type="button" class="settings-row__value" @click="startEditingRate">
-            {{ formatMoney(budgetRatesStore.currentRate) }} <span aria-hidden="true">›</span>
+            {{ formatMoney(budgetRatesStore.currentRate) }} <ChevronRight aria-hidden="true" :size="15" />
           </button>
         </div>
       </div>
@@ -37,13 +37,14 @@
 <script>
 import TopBar from '../layout/TopBar.vue';
 import CategoryTree from './CategoryTree.vue';
+import { ChevronRight } from '@lucide/vue';
 import { useBudgetRatesStore } from '../../stores/budgetRates.js';
 import { useToastStore } from '../../stores/toast.js';
 import { formatMoney, parsePositiveAmount } from '../../utils/currency.js';
 
 export default {
   name: 'SettingsScreen',
-  components: { TopBar, CategoryTree },
+  components: { TopBar, CategoryTree, ChevronRight },
   data() {
     return {
       editingRate: false,

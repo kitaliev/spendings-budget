@@ -9,15 +9,20 @@
       :aria-current="tab.id === activeTab ? 'page' : null"
       @click="$emit('update:active-tab', tab.id)"
     >
-      <span class="tab-bar__icon" aria-hidden="true">{{ tab.icon }}</span>{{ tab.label }}
+      <component :is="tab.icon" class="tab-bar__icon" aria-hidden="true" :size="19" />{{ tab.label }}
     </button>
-    <button type="button" class="tab-bar__fab" aria-label="Добавить расход" @click="$emit('add-expense')">+</button>
+    <button type="button" class="tab-bar__fab" aria-label="Добавить расход" @click="$emit('add-expense')">
+      <Plus :size="24" />
+    </button>
   </nav>
 </template>
 
 <script>
+import { Wallet, Handshake, Plus } from '@lucide/vue';
+
 export default {
   name: 'TabBar',
+  components: { Plus },
   props: {
     activeTab: {
       type: String,
@@ -28,8 +33,8 @@ export default {
   data() {
     return {
       tabs: [
-        { id: 'budget', label: 'Бюджет', icon: '💰' },
-        { id: 'debts', label: 'Долги', icon: '🤝' },
+        { id: 'budget', label: 'Бюджет', icon: Wallet },
+        { id: 'debts', label: 'Долги', icon: Handshake },
       ],
     };
   },
@@ -64,7 +69,6 @@ export default {
   }
 
   &__icon {
-    font-size: 19px;
     display: block;
   }
 
@@ -78,7 +82,6 @@ export default {
     border-radius: 50%;
     background: var(--accent);
     color: var(--accent-ink);
-    font-size: 22px;
     font-weight: 600;
     display: flex;
     align-items: center;

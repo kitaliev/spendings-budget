@@ -6,7 +6,7 @@
       class="category-picker__row category-picker__row--back"
       @click="back"
     >
-      <span class="category-picker__emoji" aria-hidden="true">‹</span>
+      <ChevronLeft class="category-picker__emoji" aria-hidden="true" :size="18" />
       <span class="category-picker__name">Назад</span>
       <span class="category-picker__chevron" aria-hidden="true"></span>
     </button>
@@ -19,16 +19,20 @@
     >
       <span class="category-picker__emoji" aria-hidden="true">{{ category.emoji }}</span>
       <span class="category-picker__name">{{ category.name }}</span>
-      <span class="category-picker__chevron" aria-hidden="true">{{ hasChildren(category) ? '›' : '' }}</span>
+      <span class="category-picker__chevron" aria-hidden="true">
+        <ChevronRight v-if="hasChildren(category)" :size="16" />
+      </span>
     </button>
   </div>
 </template>
 
 <script>
+import { ChevronLeft, ChevronRight } from '@lucide/vue';
 import { useCategoriesStore } from '../../stores/categories.js';
 
 export default {
   name: 'CategoryPicker',
+  components: { ChevronLeft, ChevronRight },
   emits: ['pick'],
   data() {
     return {
@@ -89,7 +93,9 @@ export default {
   &__emoji {
     font-size: 19px;
     width: 28px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
   }
 
@@ -99,17 +105,14 @@ export default {
   }
 
   &__chevron {
+    display: flex;
+    align-items: center;
     color: var(--ink-muted);
-    font-size: 13px;
   }
 
   &__row--back {
     color: var(--accent-strong);
     font-weight: 600;
-
-    .category-picker__emoji {
-      font-size: 15px;
-    }
   }
 }
 </style>

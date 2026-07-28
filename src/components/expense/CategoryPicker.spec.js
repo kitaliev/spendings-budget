@@ -20,8 +20,8 @@ describe('CategoryPicker at the root level', () => {
     const rows = wrapper.findAll('.category-picker__row');
     expect(rows).toHaveLength(2);
     expect(rows[0].find('.category-picker__name').text()).toBe('Еда');
-    expect(rows[0].find('.category-picker__chevron').text()).toBe('›');
-    expect(rows[1].find('.category-picker__chevron').text()).toBe('');
+    expect(rows[0].find('.category-picker__chevron').find('svg').exists()).toBe(true);
+    expect(rows[1].find('.category-picker__chevron').find('svg').exists()).toBe(false);
     expect(wrapper.find('.category-picker__row--back').exists()).toBe(false);
   });
 

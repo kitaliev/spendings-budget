@@ -2,8 +2,9 @@ import { defineConfig } from 'vite';
 import { configDefaults } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   css: {
     preprocessorOptions: {
       scss: {
@@ -12,8 +13,19 @@ export default defineConfig({
       },
     },
   },
+  // https, not http: crypto.randomUUID() (used everywhere a new db record
+  // gets its id) and the service worker this app needs to be installable
+  // both require a secure context, which plain http only ever satisfies on
+  // localhost — testing over the LAN from a real phone needs this too.
+  // Self-signed (not mkcert) deliberately: no CA/profile install needed on
+  // the test device, just a one-time "continue anyway" past the warning,
+  // which fits an occasional personal-device test better than the trusted-
+  // but-more-setup alternative. Dev-server only — the real deployment (a
+  // real server + real cert) doesn't need Vite's own cert.
+  server: command === 'serve' ? { https: true } : undefined,
   plugins: [
     vue(),
+    ...(command === 'serve' ? [basicSsl()] : []),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon-192.png', 'icon-512.png'],
@@ -52,4 +64,4 @@ export default defineConfig({
     // copies of the same spec file run in the same process) the real run.
     exclude: [...configDefaults.exclude, '**/.worktrees/**'],
   },
-});
+}));

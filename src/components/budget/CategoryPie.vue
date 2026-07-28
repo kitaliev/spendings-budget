@@ -123,6 +123,16 @@ export default {
 .category-pie {
   margin-bottom: 8px;
 
+  // Rendered as a bare <p> with no rule of its own until now — it fell
+  // back to the UA default ~1em top/bottom margin and regular body-text
+  // weight/color, out of step with every other section label in this app.
+  &__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin: 0 0 10px;
+  }
+
   &__back {
     // Explicit, not just inherited — the shared button reset doesn't zero
     // padding, and this project has already shipped one real bug (MonthChart)

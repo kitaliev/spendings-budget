@@ -112,6 +112,14 @@ export function createApp(db, { hashPath, dbPath, backupDir }) {
         const ok = checkOrRegisterPassword(hashPath, password);
         if (!ok) return sendJson(res, 401, { ok: false, error: 'Неверный пароль' });
         const sid = createSession();
+        // An explicit, very long Max-Age — not just an absent one. An absent
+        // Max-Age creates a browser *session* cookie, whose survival across an
+        // installed PWA's app relaunches is inconsistent, which would undermine
+        // the actual no-expiry intent (decision #5) even though the server-side
+        // session store itself has no expiry. This is what makes the cookie
+        // itself outlive any realistic gap between app opens, so only a server
+        // restart (which clears the in-memory session Set) ever forces a
+        // re-login.
         const TEN_YEARS_IN_SECONDS = 10 * 365 * 24 * 60 * 60;
         res.setHeader('Set-Cookie', `sid=${sid}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${TEN_YEARS_IN_SECONDS}`);
         return sendJson(res, 200, { ok: true });

@@ -5419,6 +5419,15 @@ describe('CategoryTree', () => {
     expect(wrapper.findAll('.tree-row')[0].classes()).toContain('tree-row--revealed');
   });
 
+  it('reflects the revealed state on its own more-button via aria-expanded', async () => {
+    seed();
+    const wrapper = mount(CategoryTree);
+    const more = wrapper.findAll('.tree-row__more')[0];
+    expect(more.attributes('aria-expanded')).toBe('false');
+    await more.trigger('click');
+    expect(more.attributes('aria-expanded')).toBe('true');
+  });
+
   it('archives without prompting for confirmation', async () => {
     seed();
     categoriesDb.archiveCategory.mockResolvedValue(undefined);
@@ -5471,10 +5480,16 @@ Expected: FAIL — module `./CategoryTree.vue` does not exist.
     >
       <span class="tree-row__emoji">{{ row.category.emoji }}</span>
       <span class="tree-row__name">{{ row.category.name }}</span>
-      <button class="tree-row__more" aria-label="Действия" @click="toggleRevealed(row.category.id)">⋯</button>
+      <button
+        type="button"
+        class="tree-row__more"
+        aria-label="Действия"
+        :aria-expanded="revealedId === row.category.id ? 'true' : 'false'"
+        @click="toggleRevealed(row.category.id)"
+      >⋯</button>
       <div class="tree-row__actions">
-        <button class="tree-row__action tree-row__action--archive" @click="archive(row.category.id)">Архив</button>
-        <button class="tree-row__action tree-row__action--delete" @click="confirmDelete(row.category)">Удалить</button>
+        <button type="button" class="tree-row__action tree-row__action--archive" @click="archive(row.category.id)">Архив</button>
+        <button type="button" class="tree-row__action tree-row__action--delete" @click="confirmDelete(row.category)">Удалить</button>
       </div>
     </div>
   </div>
@@ -5494,6 +5509,14 @@ function flattenTree(categories, parentId, depth) {
   return result;
 }
 
+// Deliberately NOT useCategoriesStore().subtreeIds() (Task 7/19) — that
+// getter walks childrenOf(), which is scoped to *active* categories only.
+// Deleting a category cascades to its whole subtree regardless of archived
+// status (db/categories.js's deleteCategory does exactly this), so the
+// transaction count shown in the confirm dialog below needs the same
+// unfiltered scope, over the full (unfiltered) `items` list — otherwise an
+// archived subcategory's transactions would silently be left out of the
+// count, understating what's actually about to be deleted.
 function subtreeIds(categories, rootId) {
   const ids = [rootId];
   const children = categories.filter((c) => c.parentId === rootId);
@@ -5574,6 +5597,7 @@ export default {
   }
 
   &__more {
+    position: relative;
     width: 26px;
     height: 26px;
     border-radius: 50%;
@@ -5582,6 +5606,15 @@ export default {
     justify-content: center;
     color: var(--ink-muted);
     flex: 0 0 auto;
+
+    // Smaller than every other icon button already found and fixed this
+    // way (BudgetDashboard's 34px settings gear, DebtsScreen's 30px add
+    // toggle) — needs the widest hit-slop expansion of any of them.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -9px;
+    }
   }
 
   &__actions {
@@ -5622,7 +5655,7 @@ export default {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test -- src/components/settings/CategoryTree.spec.js`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 

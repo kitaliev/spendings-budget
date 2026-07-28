@@ -1,6 +1,25 @@
 <template>
   <div class="debts-screen">
-    <TopBar title="Долги" />
+    <TopBar title="Долги">
+      <template #right>
+        <button
+          type="button"
+          class="debts-screen__add-toggle"
+          aria-label="Добавить долг"
+          :aria-expanded="addingOpen ? 'true' : 'false'"
+          @click="addingOpen = !addingOpen"
+        >
+          {{ addingOpen ? '✕' : '+' }}
+        </button>
+      </template>
+    </TopBar>
+
+    <form v-if="addingOpen" class="debts-screen__add-form" @submit.prevent="submitAdd">
+      <input v-model="newName" class="debts-screen__add-name" placeholder="Название" />
+      <input v-model="newAmount" type="number" inputmode="decimal" class="debts-screen__add-amount" placeholder="Сумма" />
+      <input v-model="newComment" class="debts-screen__add-comment" placeholder="Комментарий (необязательно)" />
+      <button type="submit" class="debts-screen__add-submit">Добавить</button>
+    </form>
 
     <div class="segmented">
       <button
@@ -39,6 +58,7 @@
 import TopBar from '../layout/TopBar.vue';
 import DebtCard from './DebtCard.vue';
 import { useDebtsStore } from '../../stores/debts.js';
+import { useToastStore } from '../../stores/toast.js';
 import { formatMoney } from '../../utils/currency.js';
 
 export default {
@@ -48,6 +68,13 @@ export default {
     return {
       direction: 'owed_to_me',
       closedOpen: false,
+      addingOpen: false,
+      newName: '',
+      newAmount: '',
+      newComment: '',
+      // Neither the db layer nor the store validates or guards against
+      // concurrent calls — same reasoning as DebtCard's submitPayment guard.
+      submitting: false,
       segments: [
         { value: 'owed_to_me', label: 'Мне должны' },
         { value: 'i_owe', label: 'Я должен' },
@@ -67,6 +94,30 @@ export default {
   },
   methods: {
     formatMoney,
+    async submitAdd() {
+      if (this.submitting) return;
+      const name = this.newName.trim();
+      const amount = Math.round(parseFloat(this.newAmount));
+      if (!name || !(amount > 0)) {
+        useToastStore().show(!name ? 'Введите название' : 'Сумма должна быть больше нуля');
+        return;
+      }
+      this.submitting = true;
+      try {
+        await this.debtsStore.create({
+          name,
+          amount,
+          comment: this.newComment.trim(),
+          direction: this.direction,
+        });
+        this.newName = '';
+        this.newAmount = '';
+        this.newComment = '';
+        this.addingOpen = false;
+      } finally {
+        this.submitting = false;
+      }
+    },
   },
 };
 </script>
@@ -79,6 +130,66 @@ export default {
   // the physical screen edges. Confirmed by rendering this composed with
   // real data at a real 390px viewport.
   padding: 0 18px;
+
+  &__add-toggle {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 16px;
+
+    // Same emergent-height-style gap as BudgetDashboard's own settings
+    // gear (34px, already fixed) — this one is smaller (30px) and needs
+    // even more expansion. Symmetric on all sides: nothing else shares
+    // this corner of TopBar for it to encroach on.
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -7px;
+    }
+  }
+
+  &__add-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  &__add-name {
+    flex: 2;
+    min-width: 120px;
+  }
+
+  &__add-amount {
+    flex: 1;
+    min-width: 80px;
+  }
+
+  &__add-comment {
+    flex: 1 1 100%;
+  }
+
+  &__add-name,
+  &__add-amount,
+  &__add-comment {
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+  }
+
+  &__add-submit {
+    flex: 1 1 100%;
+    padding: 10px;
+    border-radius: 11px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 650;
+    font-size: 13.5px;
+  }
 }
 
 .segmented {

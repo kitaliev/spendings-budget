@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { configDefaults } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -42,5 +43,13 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     setupFiles: ['./src/test-setup.js'],
+    // Vitest's own default exclude list only covers build artifacts/deps
+    // (node_modules, dist, .git, etc.) — it doesn't know about git worktrees,
+    // which physically nest a full second copy of this repo's tree on disk
+    // (e.g. .worktrees/<branch>/src/**). Without this, running the suite
+    // from this directory would also collect and run every spec file inside
+    // any worktree, duplicating (and potentially destabilizing, since two
+    // copies of the same spec file run in the same process) the real run.
+    exclude: [...configDefaults.exclude, '**/.worktrees/**'],
   },
 });

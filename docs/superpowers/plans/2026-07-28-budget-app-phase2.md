@@ -996,6 +996,12 @@ Expected: enabled successfully. **Do not `systemctl start` yet** — no TLS cert
 
 ## Task 11: VPS — certbot install, first cert issuance, deploy-hook
 
+**Addendum, discovered during execution — this task's original design was wrong and is corrected below:** the plan originally called for TLS-ALPN-01 (via `--preferred-challenges tls-alpn-01`, binding port 443, to avoid touching `x-ui` on port 80 at all). Empirically, certbot's `standalone` plugin does not implement TLS-ALPN-01 at all — its own `certbot plugins` output states "HTTP challenge only." Researched the current state: the certbot project has deliberately decided against ever adding native TLS-ALPN-01 support (citing that it would only ever work with the standalone plugin and forces downtime via hooks regardless). DNS-01 is not applicable either — there is no domain, only a bare IP, so there is no DNS zone to answer challenges through. A third-party plugin (`certbot-ualpn`) exists but requires moving `budget-server` off port 443 behind a PROXY-protocol-aware backend and compiling a C binary from source — a real, unwarranted rearchitecture of already-reviewed server code for a thinly-maintained dependency.
+
+Further recon during execution also found that `xray` (this VPS's actual VPN proxy) runs as a **child process of the `x-ui` systemd service**, in the same cgroup — `x-ui` and `xray` cannot be stopped independently. This was confirmed with the user directly: the only viable path to a real Let's Encrypt IP certificate here is HTTP-01 via the `standalone` plugin, which needs port 80 — meaning `x-ui` (and with it, the VPN) is stopped for the few seconds an HTTP-01 challenge takes, roughly once every ~5–6 days (this is a `shortlived`-profile IP cert; confirmed via research that `shortlived` is currently the *only* validity option Let's Encrypt offers for IP certificates — there is no longer-lived alternative to reduce how often this needs to happen). The user explicitly chose to accept this brief, infrequent VPN interruption over the alternatives (a self-signed cert, or reconfiguring `xray`'s own inbound port).
+
+Because HTTP-01 only ever needs port 80, **`budget-server` itself never needs to stop for a renewal** — only `x-ui` does. This is simpler than the original design, which incorrectly had `budget-server` stopping around every renewal too.
+
 **Files:**
 - Create: `server/certbot-deploy-hook.sh` (in this repo, deployed as part of the normal `git pull`, not written directly on the VPS)
 
@@ -1005,6 +1011,10 @@ Expected: enabled successfully. **Do not `systemctl start` yet** — no TLS cert
 #!/bin/bash
 set -euo pipefail
 
+# Only fires when certbot actually renews (unlike --pre-hook/--post-hook,
+# which run on every daily check regardless of whether renewal happened) —
+# so budget-server is only ever restarted when there's a genuinely new
+# cert to pick up, not once a day for nothing.
 CERTS_DIR="/opt/budget-app/repo/server/certs"
 mkdir -p "$CERTS_DIR"
 cp "$RENEWED_LINEAGE/fullchain.pem" "$CERTS_DIR/fullchain.pem"
@@ -1012,6 +1022,7 @@ cp "$RENEWED_LINEAGE/privkey.pem" "$CERTS_DIR/privkey.pem"
 chown budget:budget "$CERTS_DIR/fullchain.pem" "$CERTS_DIR/privkey.pem"
 chmod 644 "$CERTS_DIR/fullchain.pem"
 chmod 600 "$CERTS_DIR/privkey.pem"
+systemctl restart budget-server
 ```
 
 `$RENEWED_LINEAGE` is an environment variable certbot sets for deploy-hooks, pointing at the live `/etc/letsencrypt/live/<name>/` directory for the cert that was just (re)issued — no argument parsing needed.
@@ -1034,28 +1045,31 @@ chmod +x /opt/budget-app/repo/server/certbot-deploy-hook.sh
 
 Run over SSH as root:
 ```bash
+apt-get install -y snapd
 snap install core && snap refresh core
 snap install --classic certbot
 ln -s /snap/bin/certbot /usr/bin/certbot
 certbot --version
 ```
 
-Snap (not `apt install certbot`) specifically because it tracks upstream releases directly — `--preferred-profile` (needed for the `shortlived` IP-cert profile) is a newer flag that Ubuntu 24.04's apt-packaged certbot may not have.
+Snap (not `apt install certbot`) specifically because it tracks upstream releases directly — `--preferred-profile` (needed for the `shortlived` IP-cert profile) is a newer flag than Ubuntu 24.04's apt-packaged certbot (2.9.0) has; confirmed directly (`certbot certonly --help all` on the apt version has no `--preferred-profile` entry at all). `snapd` is not installed by default on this particular VPS image (common for minimal cloud images) and needs installing first.
 
-Expected: `certbot --version` reports a recent version; `certbot --help certonly | grep preferred-profile` shows the flag exists.
+Expected: `certbot --version` reports 5.x or later; `certbot certonly --help all | grep preferred-profile` shows the flag exists.
 
 - [ ] **Step 4: Issue the first certificate**
 
-`budget-server` is enabled but not yet started (Task 10), so port 443 is free — required for the TLS-ALPN-01 challenge below.
+This is the one moment `x-ui`/the VPN goes down before the automated hooks exist to do it — stop it manually, issue, restart immediately:
 
 ```bash
-certbot certonly --standalone --preferred-challenges tls-alpn-01 --preferred-profile shortlived \
+systemctl stop x-ui
+certbot certonly --standalone --preferred-challenges http --preferred-profile shortlived \
   -d 206.223.241.54 \
   --deploy-hook /opt/budget-app/repo/server/certbot-deploy-hook.sh \
   --non-interactive --agree-tos -m alievsakit@gmail.com
+systemctl start x-ui
 ```
 
-`--preferred-challenges tls-alpn-01` makes certbot's own standalone plugin bind port 443 (not 80) to complete domain validation — this is what avoids any conflict with `x-ui` on port 80. Expected: certbot reports success; the deploy-hook fires automatically, creating `/opt/budget-app/repo/server/certs/fullchain.pem` and `privkey.pem`, owned by `budget`.
+`--standalone` binds port 80 itself to answer the HTTP-01 challenge, which needs `x-ui` (the only other thing on port 80) stopped for the duration — expect this whole sequence to take well under a minute. Expected: certbot reports success; the deploy-hook fires automatically, creating `/opt/budget-app/repo/server/certs/fullchain.pem`/`privkey.pem` (owned by `budget`) and attempting `systemctl restart budget-server` — harmless at this point since the service isn't started yet (Task 10 only enabled it).
 
 - [ ] **Step 5: Verify the cert files and start the service for the first time**
 
@@ -1063,15 +1077,18 @@ certbot certonly --standalone --preferred-challenges tls-alpn-01 --preferred-pro
 ls -la /opt/budget-app/repo/server/certs/
 systemctl start budget-server
 systemctl status budget-server
+systemctl status x-ui
 ```
 
-Expected: both `.pem` files exist, owned by `budget:budget`; `systemctl status` shows `active (running)` with no crash-loop.
+Expected: both `.pem` files exist, owned by `budget:budget`; both services show `active (running)` with no crash-loop.
 
 ---
 
 ## Task 12: VPS — daily renewal timer
 
 **Files:** none (server provisioning)
+
+**Addendum, discovered during execution:** matching Task 11's corrected design — the renewal cycle only ever needs to stop/start `x-ui` (for the HTTP-01 challenge's port 80), never `budget-server` directly. `budget-server` only restarts on days a renewal genuinely happens, via the deploy-hook script itself (Task 11), not on every daily check.
 
 - [ ] **Step 1: Create the renewal service unit**
 
@@ -1083,12 +1100,12 @@ Description=Certbot renewal check for budget-server's IP cert
 
 [Service]
 Type=oneshot
-ExecStartPre=/bin/systemctl stop budget-server
+ExecStartPre=/bin/systemctl stop x-ui
 ExecStart=/usr/bin/certbot renew --quiet
-ExecStartPost=/bin/systemctl start budget-server
+ExecStartPost=/bin/systemctl start x-ui
 ```
 
-`ExecStartPre`/`ExecStartPost` always run around every renewal *attempt* (this cert's ~160-hour validity means certbot will attempt a renewal on most daily checks, per its own proportional renewal-window logic for short-lived certs) — stopping `budget-server` frees port 443 for the TLS-ALPN-01 challenge, and it's always restarted afterward regardless of whether certbot actually renewed anything that run.
+`ExecStartPre`/`ExecStartPost` always run around every renewal *attempt* (this cert's ~160-hour validity means certbot will attempt a renewal on most daily checks, per its own proportional renewal-window logic for short-lived certs) — stopping `x-ui` frees port 80 for the HTTP-01 challenge (and briefly interrupts the VPN, which the user has explicitly accepted), and it's always restarted afterward regardless of whether certbot actually renewed anything that run. `budget-server` itself is untouched by this unit — see Task 11's deploy-hook, which restarts it only when a cert is actually renewed.
 
 - [ ] **Step 2: Create the timer unit**
 
@@ -1121,10 +1138,11 @@ Expected: the timer is listed as active with a scheduled next-run time.
 
 ```bash
 systemctl start certbot-renew.service
+systemctl status x-ui
 systemctl status budget-server
 ```
 
-Expected: `budget-server` briefly stops and restarts (visible in `journalctl -u budget-server` timestamps), ends up `active (running)` again, and the cert files' modification times are unchanged if renewal wasn't yet due, or refreshed if it was — either way, the service comes back up.
+Expected: `x-ui` briefly stops and restarts (visible in `journalctl -u x-ui` timestamps), ends up `active (running)` again; `budget-server` stays running throughout if the cert wasn't yet due for renewal (most days), or itself restarts via the deploy-hook if it was.
 
 ---
 

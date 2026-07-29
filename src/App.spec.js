@@ -3,15 +3,20 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import App from './App.vue';
 import { useToastStore } from './stores/toast.js';
+import { useBackupStore } from './stores/backup.js';
 import * as categoriesDb from './db/categories.js';
 import * as ratesDb from './db/budgetRates.js';
 import * as transactionsDb from './db/transactions.js';
 import * as debtsDb from './db/debts.js';
+import * as backupApi from './api/backup.js';
+import * as restoreDb from './db/restore.js';
 
 vi.mock('./db/categories.js');
 vi.mock('./db/budgetRates.js');
 vi.mock('./db/transactions.js');
 vi.mock('./db/debts.js');
+vi.mock('./api/backup.js');
+vi.mock('./db/restore.js');
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -20,9 +25,22 @@ beforeEach(() => {
   categoriesDb.listCategories.mockResolvedValue([]);
   ratesDb.seedDefaultRateIfEmpty.mockResolvedValue(undefined);
   ratesDb.listRates.mockResolvedValue([{ id: 'r1', amount: 2500, effectiveFrom: '2026-01-01' }]);
-  transactionsDb.listTransactions.mockResolvedValue([]);
+  transactionsDb.listTransactions.mockResolvedValue([
+    { id: 't0', amount: 100, date: '2026-01-01', categoryId: 'c0' },
+  ]);
   debtsDb.listDebts.mockResolvedValue([]);
   debtsDb.listAllPayments.mockResolvedValue([]);
+  // Real (fake-indexeddb-backed) IndexedDB writes dispatch their completion
+  // events as actual queued tasks, per spec — not microtasks — so unlike
+  // every other db module mocked above, leaving this one real would mean
+  // backupStore.restore()'s chain needs more macrotask ticks to settle than
+  // a single `await flushPromises()` provides (confirmed by tracing: the
+  // real restoreAllFromSnapshot() does eventually resolve, just well after
+  // the assertions below already ran). Mocking it keeps this file testing
+  // what it's meant to — App.vue's orchestration — fully microtask-based
+  // like the rest of this suite; restoreAllFromSnapshot's actual behavior
+  // against real IndexedDB is already exhaustively covered by db/restore.spec.js.
+  restoreDb.restoreAllFromSnapshot.mockResolvedValue(undefined);
 });
 
 describe('App on launch', () => {
@@ -212,5 +230,112 @@ describe('App — editing a transaction from the dashboard list', () => {
     await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('edit-transaction', transaction);
     await wrapper.findComponent({ name: 'ExpenseModal' }).vm.$emit('close');
     expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('editingTransaction')).toBeNull();
+  });
+});
+
+describe('App — restore prompt on an empty launch', () => {
+  it('shows a restore prompt instead of the expense modal when there is no local data', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('.restore-prompt').exists()).toBe(true);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(false);
+  });
+
+  it('does not show a restore prompt when there is already local data', async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.find('.restore-prompt').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+  });
+
+  it('restores from the server and opens the expense modal when confirmed while already logged in', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: true });
+    backupApi.restore.mockResolvedValue({
+      categories: [], transactions: [], budgetRates: [], debts: [], debtPayments: [],
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__confirm').trigger('click');
+    await flushPromises();
+    expect(backupApi.restore).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.restore-prompt').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+  });
+
+  it('opens Settings instead of restoring when confirmed while not logged in, reusing its login form rather than a second one', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: false });
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__confirm').trigger('click');
+    await flushPromises();
+    expect(backupApi.restore).not.toHaveBeenCalled();
+    expect(wrapper.find('.restore-prompt').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'SettingsScreen' }).exists()).toBe(true);
+  });
+
+  it('dismisses the prompt and opens the expense modal without restoring, when declined', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__dismiss').trigger('click');
+    expect(backupApi.restore).not.toHaveBeenCalled();
+    expect(wrapper.find('.restore-prompt').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+  });
+
+  it('completes the restore automatically when Settings is closed after logging in mid-restore-attempt', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: false });
+    backupApi.restore.mockResolvedValue({
+      categories: [], transactions: [], budgetRates: [], debts: [], debtPayments: [],
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__confirm').trigger('click');
+    await flushPromises();
+    expect(wrapper.findComponent({ name: 'SettingsScreen' }).exists()).toBe(true);
+
+    // Simulate a successful login having happened while Settings was open
+    // (SettingsScreen's own login form, built in Task 18, is what would
+    // really flip this in production — not re-tested here, since that's
+    // already covered by SettingsScreen.spec.js).
+    useBackupStore().loggedIn = true;
+    await wrapper.find('.app-shell__settings-close').trigger('click');
+    await flushPromises();
+
+    expect(backupApi.restore).toHaveBeenCalledTimes(1);
+    expect(wrapper.findComponent({ name: 'SettingsScreen' }).exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+  });
+
+  it('does not attempt a restore when Settings is closed without having logged in', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: false });
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__confirm').trigger('click');
+    await flushPromises();
+
+    await wrapper.find('.app-shell__settings-close').trigger('click');
+    await flushPromises();
+
+    expect(backupApi.restore).not.toHaveBeenCalled();
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+  });
+
+  it('closing Settings normally (never having attempted a restore) does not trigger one', async () => {
+    // Regression guard for resumeRestoreAfterLogin's default: opening
+    // Settings via the ordinary gear icon (not via the restore prompt)
+    // must not accidentally restore on close.
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.findComponent({ name: 'BudgetDashboard' }).vm.$emit('open-settings');
+    await wrapper.vm.$nextTick();
+    await wrapper.find('.app-shell__settings-close').trigger('click');
+    await flushPromises();
+    expect(backupApi.restore).not.toHaveBeenCalled();
   });
 });

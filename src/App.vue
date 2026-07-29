@@ -1,11 +1,11 @@
 <template>
   <div id="app-shell" class="app-shell">
-    <!-- showExpenseModal must count here too, not just showSettings — with
-         TransactionList (rows behind this same content div) a keyboard/AT
-         user could otherwise Tab into a background row while the modal is
-         open and silently switch its editingTransaction, discarding
-         whatever unsaved amount was typed, with zero warning. -->
-    <div class="app-shell__content" :inert="showSettings || showExpenseModal">
+    <!-- showExpenseModal/showRestorePrompt must count here too, not just
+         showSettings — with TransactionList (rows behind this same content
+         div) a keyboard/AT user could otherwise Tab into a background row
+         while an overlay is open and silently switch its editingTransaction,
+         discarding whatever unsaved amount was typed, with zero warning. -->
+    <div class="app-shell__content" :inert="showSettings || showExpenseModal || showRestorePrompt">
       <template v-if="ready">
         <BudgetDashboard
           v-if="activeTab === 'budget'"
@@ -17,17 +17,28 @@
       <p v-else class="app-shell__loading">Загрузка…</p>
     </div>
 
-    <div class="app-shell__tabs" :inert="showSettings || showExpenseModal">
+    <div class="app-shell__tabs" :inert="showSettings || showExpenseModal || showRestorePrompt">
       <Toast :message="toastStore.message" />
       <TabBar :active-tab="activeTab" @update:active-tab="activeTab = $event" @add-expense="openAddModal" />
     </div>
 
     <template v-if="showSettings">
       <SettingsScreen class="app-shell__settings-overlay" />
-      <button type="button" class="app-shell__settings-close" aria-label="Закрыть настройки" @click="showSettings = false">
+      <button type="button" class="app-shell__settings-close" aria-label="Закрыть настройки" @click="closeSettings">
         <X :size="16" />
       </button>
     </template>
+
+    <div v-if="showRestorePrompt" class="restore-prompt" role="dialog" aria-modal="true" aria-labelledby="restore-prompt-text">
+      <div class="restore-prompt__backdrop"></div>
+      <div class="restore-prompt__sheet">
+        <p id="restore-prompt-text" class="restore-prompt__text">
+          Похоже, локальных данных ещё нет. Восстановить последнюю резервную копию с сервера?
+        </p>
+        <button type="button" class="restore-prompt__confirm" @click="confirmRestore">Восстановить</button>
+        <button type="button" class="restore-prompt__dismiss" @click="dismissRestorePrompt">Не сейчас</button>
+      </div>
+    </div>
 
     <ExpenseModal
       :visible="showExpenseModal"
@@ -49,6 +60,7 @@ import { useCategoriesStore } from './stores/categories.js';
 import { useBudgetRatesStore } from './stores/budgetRates.js';
 import { useTransactionsStore } from './stores/transactions.js';
 import { useDebtsStore } from './stores/debts.js';
+import { useBackupStore } from './stores/backup.js';
 import { useToastStore } from './stores/toast.js';
 
 export default {
@@ -66,6 +78,13 @@ export default {
       activeTab: 'budget',
       showSettings: false,
       showExpenseModal: false, // flips true once ready, see created() below
+      showRestorePrompt: false,
+      // Set only when confirmRestore() redirects to Settings because the
+      // user wasn't logged in yet — remembers that closing Settings should
+      // resume the restore (if login actually succeeded meanwhile) rather
+      // than stranding the user with no way back to the prompt they
+      // already dismissed to get there.
+      resumeRestoreAfterLogin: false,
       editingTransaction: null,
     };
   },
@@ -82,7 +101,15 @@ export default {
         useTransactionsStore().load(),
         useDebtsStore().load(),
       ]);
-      this.showExpenseModal = true; // greets the user on every launch, once there's real data to enter against
+      // "Empty" is judged by transactions/debts, not categories — categories
+      // always has at least the seeded default (see categoriesStore.load()),
+      // so it's never a useful signal for "this looks like a fresh install".
+      const isEmpty = useTransactionsStore().items.length === 0 && useDebtsStore().items.length === 0;
+      if (isEmpty) {
+        this.showRestorePrompt = true;
+      } else {
+        this.showExpenseModal = true; // greets the user on every launch, once there's real data to enter against
+      }
     } catch (err) {
       // Nothing else in this app has a retry affordance for a failed initial
       // load (quota exceeded, IndexedDB blocked in private mode, etc.) — a
@@ -107,6 +134,43 @@ export default {
     closeExpenseModal() {
       this.showExpenseModal = false;
       this.editingTransaction = null;
+    },
+    async confirmRestore() {
+      const backupStore = useBackupStore();
+      const loggedIn = await backupStore.checkStatus().catch(() => false);
+      if (!loggedIn) {
+        // Decision #8: no second, separate login surface for this prompt —
+        // send the user to the same login form Settings already has, and
+        // remember to resume the restore once they close it (see
+        // closeSettings() below) rather than stranding them with no way
+        // back to what they just confirmed.
+        this.showRestorePrompt = false;
+        this.resumeRestoreAfterLogin = true;
+        this.showSettings = true;
+        return;
+      }
+      await backupStore.restore();
+      this.showRestorePrompt = false;
+      this.showExpenseModal = true;
+    },
+    dismissRestorePrompt() {
+      this.showRestorePrompt = false;
+      this.showExpenseModal = true;
+    },
+    async closeSettings() {
+      this.showSettings = false;
+      if (this.resumeRestoreAfterLogin) {
+        this.resumeRestoreAfterLogin = false;
+        // Only actually restore if login genuinely succeeded while
+        // Settings was open — if the user just closed it without logging
+        // in, this falls through to opening the expense modal normally,
+        // the same as declining the prompt outright, rather than nagging
+        // them again.
+        if (useBackupStore().loggedIn) {
+          await useBackupStore().restore();
+        }
+        this.showExpenseModal = true;
+      }
     },
   },
 };
@@ -187,6 +251,52 @@ export default {
       position: absolute;
       inset: -7px;
     }
+  }
+}
+
+.restore-prompt {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+
+  &__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.38);
+  }
+
+  &__sheet {
+    position: relative;
+    width: 100%;
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    padding: 22px 18px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  &__text {
+    font-size: 14.5px;
+    color: var(--ink-secondary);
+    margin-bottom: 16px;
+  }
+
+  &__confirm {
+    width: 100%;
+    min-height: 44px;
+    border-radius: 12px;
+    background: var(--accent-strong);
+    color: var(--surface);
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+
+  &__dismiss {
+    width: 100%;
+    min-height: 44px;
+    color: var(--ink-muted);
+    font-size: 14px;
   }
 }
 </style>

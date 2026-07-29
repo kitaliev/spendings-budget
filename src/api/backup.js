@@ -4,13 +4,18 @@
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export async function login(password) {
-  const res = await fetch('/api/login', {
-    method: 'POST',
-    headers: JSON_HEADERS,
-    credentials: 'include',
-    body: JSON.stringify({ password }),
-  });
-  const body = await res.json();
+  let res, body;
+  try {
+    res = await fetch('/api/login', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      credentials: 'include',
+      body: JSON.stringify({ password }),
+    });
+    body = await res.json();
+  } catch {
+    throw new Error('Не удалось подключиться к серверу');
+  }
   if (!res.ok) throw new Error(body.error || 'Не удалось войти');
   return body;
 }

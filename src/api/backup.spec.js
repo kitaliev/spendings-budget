@@ -22,6 +22,11 @@ describe('backup API client', () => {
     await expect(backupApi.login('wrong')).rejects.toThrow('Неверный пароль');
   });
 
+  it('login normalizes a network failure to a Russian message, not the raw fetch error', async () => {
+    global.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(backupApi.login('hunter2')).rejects.toThrow('Не удалось подключиться к серверу');
+  });
+
   it('status returns the parsed loggedIn flag', async () => {
     global.fetch.mockResolvedValue({ ok: true, json: async () => ({ loggedIn: true }) });
     expect(await backupApi.status()).toEqual({ loggedIn: true });

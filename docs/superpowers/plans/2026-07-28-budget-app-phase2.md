@@ -1063,13 +1063,21 @@ This is the one moment `x-ui`/the VPN goes down before the automated hooks exist
 ```bash
 systemctl stop x-ui
 certbot certonly --standalone --preferred-challenges http --preferred-profile shortlived \
-  -d 206.223.241.54 \
+  --ip-address 206.223.241.54 \
   --deploy-hook /opt/budget-app/repo/server/certbot-deploy-hook.sh \
   --non-interactive --agree-tos -m alievsakit@gmail.com
 systemctl start x-ui
 ```
 
-`--standalone` binds port 80 itself to answer the HTTP-01 challenge, which needs `x-ui` (the only other thing on port 80) stopped for the duration — expect this whole sequence to take well under a minute. Expected: certbot reports success; the deploy-hook fires automatically, creating `/opt/budget-app/repo/server/certs/fullchain.pem`/`privkey.pem` (owned by `budget`) and attempting `systemctl restart budget-server` — harmless at this point since the service isn't started yet (Task 10 only enabled it).
+`--standalone` binds port 80 itself to answer the HTTP-01 challenge, which needs `x-ui` (the only other thing on port 80) stopped for the duration — expect this whole sequence to take well under a minute. **Use `--ip-address`, not `-d`, for the target** — confirmed empirically: certbot's own client-side validation hardcodes a rejection ("The Let's Encrypt certificate authority will not issue certificates for a bare IP address") when an IP is passed via `-d`, regardless of server-side support; `--ip-address` (added in certbot 5.3/5.4, present in the 5.7.0 installed here) is the flag that actually requests an IP SAN certificate. Expected: certbot reports success; the deploy-hook fires automatically, creating `/opt/budget-app/repo/server/certs/fullchain.pem`/`privkey.pem` (owned by `budget`) and attempting `systemctl restart budget-server` — harmless at this point since the service isn't started yet (Task 10 only enabled it).
+
+**Also discovered on first issuance:** certbot (via snap) auto-creates its own `snap.certbot.renew.timer`, which would attempt renewal via plain `certbot renew` with no knowledge of needing to stop `x-ui` first — left enabled, it would either silently fail (port 80 occupied) or race Task 12's own purpose-built timer. Disable it once, immediately after this step:
+
+```bash
+systemctl disable --now snap.certbot.renew.timer
+```
+
+Task 12's own `certbot-renew.timer` (with the `x-ui` stop/start hooks) is the only renewal mechanism this deployment actually wants running.
 
 - [ ] **Step 5: Verify the cert files and start the service for the first time**
 

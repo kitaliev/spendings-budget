@@ -50,4 +50,9 @@ describe('backup API client', () => {
     global.fetch.mockResolvedValue({ ok: true, json: async () => snapshot });
     expect(await backupApi.restore()).toEqual(snapshot);
   });
+
+  it('restore normalizes a network failure to a Russian message', async () => {
+    global.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(backupApi.restore()).rejects.toThrow('Не удалось подключиться к серверу');
+  });
 });

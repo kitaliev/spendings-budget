@@ -338,4 +338,70 @@ describe('App — restore prompt on an empty launch', () => {
     await flushPromises();
     expect(backupApi.restore).not.toHaveBeenCalled();
   });
+
+  it('shows a toast and keeps the prompt open when confirming a restore fails', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: true });
+    backupApi.restore.mockRejectedValue(new Error('network error'));
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__confirm').trigger('click');
+    await flushPromises();
+    expect(useToastStore().message).toBe('Не удалось восстановить резервную копию. Попробуйте ещё раз.');
+    expect(wrapper.find('.restore-prompt').exists()).toBe(true);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(false);
+  });
+
+  it('shows a toast and still opens the expense modal when the resumed restore fails after login', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: false });
+    backupApi.restore.mockRejectedValue(new Error('network error'));
+    const wrapper = mount(App);
+    await flushPromises();
+    await wrapper.find('.restore-prompt__confirm').trigger('click');
+    await flushPromises();
+
+    // Simulate a successful login having happened while Settings was open —
+    // same substitution used by the earlier "completes the restore
+    // automatically..." test, for the same reason (that mechanism belongs to
+    // SettingsScreen.spec.js, not here).
+    useBackupStore().loggedIn = true;
+    await wrapper.find('.app-shell__settings-close').trigger('click');
+    await flushPromises();
+
+    expect(useToastStore().message).toBe(
+      'Не удалось восстановить резервную копию. Перезапустите приложение, чтобы попробовать снова.'
+    );
+    // The user must land on the ordinary, usable app — not a bare dashboard
+    // with all three overlays false and no way back in for the rest of the
+    // session (resumeRestoreAfterLogin is a one-shot flag, already consumed).
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+    expect(wrapper.find('.restore-prompt').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'SettingsScreen' }).exists()).toBe(false);
+  });
+
+  it('only calls backupApi.restore once when the confirm button is double-tapped before the first request settles', async () => {
+    transactionsDb.listTransactions.mockResolvedValue([]);
+    backupApi.status.mockResolvedValue({ loggedIn: true });
+    let resolveRestore;
+    backupApi.restore.mockReturnValue(new Promise((r) => { resolveRestore = r; }));
+    const wrapper = mount(App);
+    await flushPromises();
+
+    // Same manually-controlled-promise pattern as backup.spec.js's own login
+    // double-submit test, adapted to fire through real DOM clicks: both
+    // taps are dispatched before either has a chance to resolve anything,
+    // so this proves the `restoring` guard itself, not just timing luck.
+    const confirmButton = wrapper.find('.restore-prompt__confirm');
+    const firstClick = confirmButton.trigger('click');
+    const secondClick = confirmButton.trigger('click');
+    await Promise.all([firstClick, secondClick]);
+    await flushPromises();
+    expect(backupApi.restore).toHaveBeenCalledTimes(1);
+
+    resolveRestore({ categories: [], transactions: [], budgetRates: [], debts: [], debtPayments: [] });
+    await flushPromises();
+    expect(wrapper.find('.restore-prompt').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: 'ExpenseModal' }).props('visible')).toBe(true);
+  });
 });

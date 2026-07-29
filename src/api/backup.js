@@ -36,7 +36,12 @@ export async function sync(snapshot) {
 }
 
 export async function restore() {
-  const res = await fetch('/api/restore', { credentials: 'include' });
+  let res;
+  try {
+    res = await fetch('/api/restore', { credentials: 'include' });
+  } catch {
+    throw new Error('Не удалось подключиться к серверу');
+  }
   if (!res.ok) throw new Error('Не удалось получить резервную копию');
   return res.json();
 }

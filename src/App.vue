@@ -35,7 +35,7 @@
         <p id="restore-prompt-text" class="restore-prompt__text">
           Похоже, локальных данных ещё нет. Восстановить последнюю резервную копию с сервера?
         </p>
-        <button type="button" class="restore-prompt__confirm" @click="confirmRestore">Восстановить</button>
+        <button type="button" class="restore-prompt__confirm" :disabled="restoring" @click="confirmRestore">Восстановить</button>
         <button type="button" class="restore-prompt__dismiss" @click="dismissRestorePrompt">Не сейчас</button>
       </div>
     </div>
@@ -85,6 +85,11 @@ export default {
       // than stranding the user with no way back to the prompt they
       // already dismissed to get there.
       resumeRestoreAfterLogin: false,
+      // Double-tap guard on confirmRestore(), same class of protection as
+      // SettingsScreen.saveRate()/backup.js's own login()/sync() — neither
+      // the store nor the API layer rejects a second concurrent restore()
+      // call on its own.
+      restoring: false,
       editingTransaction: null,
     };
   },
@@ -149,9 +154,21 @@ export default {
         this.showSettings = true;
         return;
       }
-      await backupStore.restore();
-      this.showRestorePrompt = false;
-      this.showExpenseModal = true;
+      if (this.restoring) return;
+      this.restoring = true;
+      try {
+        await backupStore.restore();
+        this.showRestorePrompt = false;
+        this.showExpenseModal = true;
+      } catch {
+        // Restore prompt stays open so the user can retry immediately — a
+        // failed restore (network drop mid-request, etc.) shouldn't silently
+        // strand them with no path forward, and there's nothing destructive
+        // about leaving local IndexedDB exactly as empty as it already was.
+        useToastStore().show('Не удалось восстановить резервную копию. Попробуйте ещё раз.');
+      } finally {
+        this.restoring = false;
+      }
     },
     dismissRestorePrompt() {
       this.showRestorePrompt = false;
@@ -167,7 +184,15 @@ export default {
         // the same as declining the prompt outright, rather than nagging
         // them again.
         if (useBackupStore().loggedIn) {
-          await useBackupStore().restore();
+          try {
+            await useBackupStore().restore();
+          } catch {
+            // Nothing in this session can re-trigger the restore prompt (it's
+            // a one-shot flag already consumed by created()) — land the user
+            // on the normal app rather than a bare, empty dashboard with no
+            // explanation, and tell them how to retry.
+            useToastStore().show('Не удалось восстановить резервную копию. Перезапустите приложение, чтобы попробовать снова.');
+          }
         }
         this.showExpenseModal = true;
       }

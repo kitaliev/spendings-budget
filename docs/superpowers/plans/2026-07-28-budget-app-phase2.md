@@ -862,20 +862,23 @@ git commit -m "feat: add sync/restore endpoints, static serving, and the HTTPS b
 
 **Files:** none (server provisioning — commands run over SSH against `206.223.241.54`, no repo files change)
 
-- [ ] **Step 1: Install Node.js from Ubuntu's own repository**
+**Addendum, discovered during execution:** Ubuntu 24.04's own apt-packaged Node.js is v18.19.1. The frontend build (`npm run build`, via `vite-plugin-pwa`'s `generateSW` mode) fails on that version with `Error: Dynamic require of "workbox-build" is not supported` — confirmed as a genuine Node-version incompatibility, not a flake, by reproducing the identical build successfully on Node v20 locally and failing identically on the VPS's v18 before upgrading. Node.js is installed via NodeSource's setup script instead, for v20 — the version steps below reflect this.
+
+- [ ] **Step 1: Install Node.js 20 via NodeSource**
 
 Run over SSH as root:
 ```bash
-apt-get update
-apt-get install -y nodejs npm build-essential python3
+curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
+bash /tmp/nodesource_setup.sh
+apt-get install -y nodejs build-essential python3
 ```
 
-`build-essential`/`python3` are a defensive install: `better-sqlite3` ships prebuilt binaries for common Linux/Node combinations and normally needs no compilation, but if a prebuilt binary isn't available for this exact VPS environment, npm silently falls back to compiling from source, which needs these.
+(NodeSource's setup script already adds `npm` as part of the `nodejs` package, unlike Ubuntu's own split packaging — no separate `npm` package needed.) `build-essential`/`python3` are a defensive install: `better-sqlite3` ships prebuilt binaries for common Linux/Node combinations and normally needs no compilation, but if a prebuilt binary isn't available for this exact VPS environment, npm silently falls back to compiling from source, which needs these.
 
 - [ ] **Step 2: Verify the install**
 
 Run: `node --version && npm --version`
-Expected: Node reports a v18.x line (Ubuntu 24.04's `nodejs` package) and npm reports a matching 9.x/10.x version. Confirm this is $\geq$ 18 — `node:test` (used by every server test in this plan) needs it.
+Expected: Node reports a v20.x line and npm reports a matching 10.x version.
 
 Note: no changes to port 80/`x-ui`/`xray` in this task.
 
